@@ -34,9 +34,15 @@ async def global_exception_handler(request, exc):
         content={"message": "Internal Server Error", "detail": str(exc)},
     )
 
+origins = [
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "https://investment-ai-production.up.railway.app"
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
