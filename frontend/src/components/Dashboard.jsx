@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { TrendingUp, Wallet, DollarSign, Activity, PlusCircle, MinusCircle, X } from 'lucide-react';
+import { API_BASE_URL } from '../config';
 
 const StatCard = ({ title, value, subtext, icon: Icon, trend, onAction }) => (
     <div className="card relative overflow-hidden group">
@@ -34,7 +35,7 @@ const CashModal = ({ isOpen, onClose, onUpdate }) => {
     const handleSubmit = async (e) => {
         e.preventDefault();
         try {
-            await axios.post('http://localhost:8000/portfolio/cash', { amount: parseFloat(amount), type });
+            await axios.post(`${API_BASE_URL}/portfolio/cash`, { amount: parseFloat(amount), type });
             onUpdate();
             onClose();
         } catch (error) {
@@ -97,11 +98,11 @@ const Dashboard = () => {
 
     const fetchData = async () => {
         try {
-            const portRes = await axios.get('http://localhost:8000/portfolio');
+            const portRes = await axios.get(`${API_BASE_URL}/portfolio`);
             setPortfolio(portRes.data);
-            const planRes = await axios.get('http://localhost:8000/autonomous/plan');
+            const planRes = await axios.get(`${API_BASE_URL}/autonomous/plan`);
             setPlan(planRes.data);
-            const histRes = await axios.get('http://localhost:8000/portfolio/history');
+            const histRes = await axios.get(`${API_BASE_URL}/portfolio/history`);
             setHistory(histRes.data);
         } catch (error) {
             console.error("Error fetching data", error);

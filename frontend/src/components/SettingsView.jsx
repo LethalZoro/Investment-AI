@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Save, Shield, Cpu, DollarSign } from 'lucide-react';
+import { API_BASE_URL } from '../config';
 
 const SettingsView = () => {
     const [settings, setSettings] = useState({
-        autonomous_mode: false,
         daily_trade_budget: 5000,
-        rollover_percent: 0.30,
+        ai_cash_balance: 10000,
+        autonomous_mode: false,
+        rollover_percent: 0.5,
         polling_interval: 5,
         trading_start_time: "09:30",
         trading_end_time: "15:30"
@@ -17,10 +19,12 @@ const SettingsView = () => {
     useEffect(() => {
         const fetchSettings = async () => {
             try {
-                const res = await axios.get('http://localhost:8000/settings');
-                setSettings(res.data);
+                const response = await axios.get(`${API_BASE_URL}/settings`);
+                if (response.data) {
+                    setSettings(response.data);
+                }
             } catch (error) {
-                console.error("Error fetching settings", error);
+                console.error("Error fetching settings:", error);
             } finally {
                 setLoading(false);
             }
@@ -30,18 +34,11 @@ const SettingsView = () => {
 
     const handleChange = (e) => {
         const { name, value, type, checked } = e.target;
-
-        let newValue = value;
-        if (type === 'checkbox') {
-            newValue = checked;
-        } else if (type === 'number') {
-            newValue = parseFloat(value);
-        }
-        // For 'text', 'time', 'select-one', etc., keep as string
-
         setSettings(prev => ({
             ...prev,
-            [name]: newValue
+            [name]: type === 'checkbox' ? checked :
+                (name === 'trading_start_time' || name === 'trading_end_time') ? value :
+                    parseFloat(value)
         }));
     };
 
@@ -49,10 +46,10 @@ const SettingsView = () => {
         e.preventDefault();
         setSaving(true);
         try {
-            await axios.post('http://localhost:8000/settings', settings);
+            await axios.post(`${API_BASE_URL}/settings`, settings);
             alert("Settings saved successfully!");
         } catch (error) {
-            console.error("Error saving settings", error);
+            console.error("Error saving settings:", error);
             alert("Failed to save settings.");
         } finally {
             setSaving(false);

@@ -1,19 +1,95 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Plus, Trash2, TrendingUp, TrendingDown, X } from 'lucide-react';
+import { Briefcase, TrendingUp, TrendingDown, Plus, Trash2, X } from 'lucide-react';
+import { API_BASE_URL } from '../config';
+
+const SellModal = ({ isOpen, onClose, item, onSuccess }) => {
+    const [quantity, setQuantity] = useState(item.quantity);
+    const [price, setPrice] = useState(item.current_price);
+
+    if (!isOpen) return null;
+
+    const handleSell = async (e) => {
+        e.preventDefault();
+        try {
+            await axios.post(`${API_BASE_URL}/portfolio/sell`, {
+                symbol: item.symbol,
+                quantity: parseInt(quantity),
+                price: parseFloat(price)
+            });
+            onSuccess();
+            onClose();
+        } catch (error) {
+            alert("Error selling item: " + (error.response?.data?.detail || error.message));
+        }
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
+            <div className="card w-96 relative animate-fade-in">
+                <button onClick={onClose} className="absolute top-4 right-4 text-text-secondary hover:text-white">
+                    <X className="w-5 h-5" />
+                </button>
+                <h2 className="text-xl font-bold text-white mb-4">Sell {item.symbol}</h2>
+                <form onSubmit={handleSell} className="space-y-4">
+                    <div>
+                        <label className="block text-sm text-text-secondary mb-1">Quantity (Max: {item.quantity})</label>
+                        <input
+                            type="number"
+                            value={quantity}
+                            onChange={(e) => setQuantity(e.target.value)}
+                            max={item.quantity}
+                            min="1"
+                            className="input w-full"
+                            required
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm text-text-secondary mb-1">Sell Price</label>
+                        <input
+                            type="number"
+                            value={price}
+                            onChange={(e) => setPrice(e.target.value)}
+                            className="input w-full"
+                            required
+                        />
+                    </div>
+                    <div className="p-3 bg-slate-800 rounded-lg">
+                        <div className="flex justify-between text-sm mb-1">
+                            <span className="text-text-secondary">Total Value:</span>
+                            <span className="text-white font-bold">PKR {(quantity * price).toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                            <span className="text-text-secondary">Est. PnL:</span>
+                            <span className={`${(price - item.avg_cost) >= 0 ? 'text-secondary' : 'text-danger'} font-bold`}>
+                                {((price - item.avg_cost) * quantity).toLocaleString()}
+                            </span>
+                        </div>
+                    </div>
+                    <button type="submit" className="btn btn-primary w-full bg-danger hover:bg-red-600 border-none">
+                        Confirm Sell
+                    </button>
+                </form>
+            </div>
+        </div>
+    );
+};
 
 const PortfolioView = () => {
-    const [portfolio, setPortfolio] = useState(null);
-    const [newItem, setNewItem] = useState({ symbol: '', quantity: 0, avg_cost: 0, strategy_tag: 'UNASSIGNED' });
+    const [portfolio, setPortfolio] = useState({ holdings: [], summary: {} });
+    const [loading, setLoading] = useState(true);
+    const [newItem, setNewItem] = useState({ symbol: '', quantity: '', avg_cost: '', strategy_tag: 'UNASSIGNED' });
     const [isSellModalOpen, setIsSellModalOpen] = useState(false);
     const [selectedItem, setSelectedItem] = useState(null);
 
     const fetchPortfolio = async () => {
         try {
-            const res = await axios.get('http://localhost:8000/portfolio');
-            setPortfolio(res.data);
+            const response = await axios.get(`${API_BASE_URL}/portfolio`);
+            setPortfolio(response.data);
         } catch (error) {
-            console.error("Error fetching portfolio", error);
+            console.error("Error fetching portfolio:", error);
+        } finally {
+            setLoading(false);
         }
     };
 
@@ -24,32 +100,39 @@ const PortfolioView = () => {
     const handleAdd = async (e) => {
         e.preventDefault();
         try {
-            await axios.post('http://localhost:8000/portfolio/add', newItem);
-            setNewItem({ symbol: '', quantity: 0, avg_cost: 0, strategy_tag: 'UNASSIGNED' });
+            await axios.post(`${API_BASE_URL}/portfolio/add`, newItem);
+            setNewItem({ symbol: '', quantity: '', avg_cost: '', strategy_tag: 'UNASSIGNED' });
             fetchPortfolio();
         } catch (error) {
-            console.error("Error adding item", error);
+            alert("Error adding position");
         }
     };
-
-    if (!portfolio) return <div className="text-center p-10 text-primary animate-pulse">Loading Portfolio...</div>;
 
     const openSellModal = (item) => {
         setSelectedItem(item);
         setIsSellModalOpen(true);
     };
 
+    if (loading) return <div className="text-center p-10 text-primary animate-pulse">Loading Portfolio...</div>;
+
     return (
-        <div className="space-y-6 animate-slide-up">
-            <div className="flex justify-between items-center">
-                <h1 className="text-3xl font-bold text-white">Portfolio Holdings</h1>
+        <div className="space-y-8 animate-fade-in">
+            <div className="flex justify-between items-end">
+                <div>
+                    <h1 className="text-3xl font-bold text-white flex items-center gap-3">
+                        <Briefcase className="w-8 h-8 text-primary" /> Portfolio Management
+                    </h1>
+                    <p className="text-text-secondary mt-1">Track your holdings and performance.</p>
+                </div>
                 <div className="text-right">
-                    <p className="text-text-secondary text-sm">Total Value</p>
-                    <p className="text-2xl font-bold text-white">PKR {portfolio.total_value.toLocaleString()}</p>
+                    <p className="text-sm text-text-secondary">Total PnL</p>
+                    <p className={`text-2xl font-bold ${portfolio.summary.total_pnl >= 0 ? 'text-secondary' : 'text-danger'}`}>
+                        {portfolio.summary.total_pnl >= 0 ? '+' : ''}PKR {portfolio.summary.total_pnl?.toLocaleString()}
+                    </p>
                 </div>
             </div>
 
-            {/* Add New Item Form */}
+            {/* Add New Position */}
             <div className="card">
                 <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
                     <Plus className="w-5 h-5 text-primary" /> Add New Position
@@ -166,78 +249,6 @@ const PortfolioView = () => {
                     onSuccess={fetchPortfolio}
                 />
             )}
-        </div>
-    );
-};
-
-const SellModal = ({ isOpen, onClose, item, onSuccess }) => {
-    const [quantity, setQuantity] = useState(item.quantity);
-    const [price, setPrice] = useState(item.current_price);
-
-    if (!isOpen) return null;
-
-    const handleSell = async (e) => {
-        e.preventDefault();
-        try {
-            await axios.post('http://localhost:8000/portfolio/sell', {
-                symbol: item.symbol,
-                quantity: parseInt(quantity),
-                price: parseFloat(price)
-            });
-            onSuccess();
-            onClose();
-        } catch (error) {
-            alert("Error selling item: " + (error.response?.data?.detail || error.message));
-        }
-    };
-
-    return (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
-            <div className="card w-96 relative animate-fade-in">
-                <button onClick={onClose} className="absolute top-4 right-4 text-text-secondary hover:text-white">
-                    <X className="w-5 h-5" />
-                </button>
-                <h2 className="text-xl font-bold text-white mb-4">Sell {item.symbol}</h2>
-                <form onSubmit={handleSell} className="space-y-4">
-                    <div>
-                        <label className="block text-sm text-text-secondary mb-1">Quantity (Max: {item.quantity})</label>
-                        <input
-                            type="number"
-                            value={quantity}
-                            onChange={(e) => setQuantity(e.target.value)}
-                            max={item.quantity}
-                            min="1"
-                            className="input w-full"
-                            required
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-sm text-text-secondary mb-1">Sell Price</label>
-                        <input
-                            type="number"
-                            value={price}
-                            onChange={(e) => setPrice(e.target.value)}
-                            className="input w-full"
-                            required
-                        />
-                    </div>
-                    <div className="p-3 bg-slate-800 rounded-lg">
-                        <div className="flex justify-between text-sm mb-1">
-                            <span className="text-text-secondary">Total Value:</span>
-                            <span className="text-white font-bold">PKR {(quantity * price).toLocaleString()}</span>
-                        </div>
-                        <div className="flex justify-between text-sm">
-                            <span className="text-text-secondary">Est. PnL:</span>
-                            <span className={`${(price - item.avg_cost) >= 0 ? 'text-secondary' : 'text-danger'} font-bold`}>
-                                {((price - item.avg_cost) * quantity).toLocaleString()}
-                            </span>
-                        </div>
-                    </div>
-                    <button type="submit" className="btn btn-primary w-full bg-danger hover:bg-red-600 border-none">
-                        Confirm Sell
-                    </button>
-                </form>
-            </div>
         </div>
     );
 };

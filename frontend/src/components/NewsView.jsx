@@ -1,31 +1,32 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { Bell, ExternalLink, RefreshCw, TrendingUp, TrendingDown, AlertTriangle, Newspaper } from 'lucide-react';
+import { Newspaper, RefreshCw, ExternalLink, TrendingUp, TrendingDown, AlertTriangle } from 'lucide-react';
+import { API_BASE_URL } from '../config';
 
 const NewsView = () => {
     const [alerts, setAlerts] = useState([]);
-    const [loading, setLoading] = useState(false);
+    const [loading, setLoading] = useState(true);
     const [analyzing, setAnalyzing] = useState(false);
 
     const fetchAlerts = async () => {
-        setLoading(true);
         try {
-            const res = await axios.get('http://localhost:8000/autonomous/alerts');
-            setAlerts(res.data);
+            setLoading(true);
+            const response = await axios.get(`${API_BASE_URL}/news/alerts`);
+            setAlerts(response.data);
         } catch (error) {
-            console.error("Error fetching alerts", error);
+            console.error("Error fetching alerts:", error);
         } finally {
             setLoading(false);
         }
     };
 
     const triggerAnalysis = async () => {
-        setAnalyzing(true);
         try {
-            await axios.post('http://localhost:8000/autonomous/analyze-news');
-            fetchAlerts();
+            setAnalyzing(true);
+            await axios.post(`${API_BASE_URL}/news/analyze`);
+            await fetchAlerts();
         } catch (error) {
-            console.error("Error triggering analysis", error);
+            console.error("Error triggering analysis:", error);
         } finally {
             setAnalyzing(false);
         }

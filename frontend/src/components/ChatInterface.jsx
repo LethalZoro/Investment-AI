@@ -1,24 +1,26 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { Send, Bot, User, Sparkles } from 'lucide-react';
-import clsx from 'clsx';
 import ReactMarkdown from 'react-markdown';
+import clsx from 'clsx';
+import { API_BASE_URL } from '../config';
 
 const ChatInterface = () => {
     const [messages, setMessages] = useState([
-        { role: 'bot', content: 'Hello! I am your PSX Investment Co-Pilot. How can I help you today?' }
+        { role: 'bot', content: "Hello! I'm your AI Investment Co-Pilot. I can analyze your portfolio, suggest trades based on news, or answer market questions. How can I help?" }
     ]);
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(false);
+    const [dataSource, setDataSource] = useState('ai'); // 'ai' or 'personal'
     const messagesEndRef = useRef(null);
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     };
 
-    useEffect(scrollToBottom, [messages]);
-
-    const [dataSource, setDataSource] = useState('ai'); // 'ai' or 'personal'
+    useEffect(() => {
+        scrollToBottom();
+    }, [messages]);
 
     const handleSend = async (e) => {
         e.preventDefault();
@@ -30,14 +32,16 @@ const ChatInterface = () => {
         setLoading(true);
 
         try {
-            const res = await axios.post('http://localhost:8000/chat', {
+            const response = await axios.post(`${API_BASE_URL}/chat`, {
                 message: input,
-                data_source: dataSource
+                context_type: dataSource
             });
-            const botMsg = { role: 'bot', content: res.data.answer };
+
+            const botMsg = { role: 'bot', content: response.data.response };
             setMessages(prev => [...prev, botMsg]);
         } catch (error) {
-            setMessages(prev => [...prev, { role: 'bot', content: 'Sorry, I encountered an error processing your request.' }]);
+            console.error("Chat error:", error);
+            setMessages(prev => [...prev, { role: 'bot', content: "Sorry, I encountered an error processing your request." }]);
         } finally {
             setLoading(false);
         }

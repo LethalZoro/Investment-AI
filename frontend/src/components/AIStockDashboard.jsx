@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { TrendingUp, TrendingDown, DollarSign, Activity, History, RefreshCw, X, ChevronDown } from 'lucide-react';
 import { ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { API_BASE_URL } from '../config';
 
 // Stock Detail Modal Component (reused from MarketView)
 const StockDetailModal = ({ symbol, onClose }) => {
@@ -13,8 +14,8 @@ const StockDetailModal = ({ symbol, onClose }) => {
         const fetchData = async () => {
             try {
                 const [klineRes, infoRes] = await Promise.all([
-                    axios.get(`http://localhost:8000/market/klines/${symbol}?timeframe=1d`),
-                    axios.get(`http://localhost:8000/market/company/${symbol}`)
+                    axios.get(`${API_BASE_URL}/market/klines/${symbol}?timeframe=1d`),
+                    axios.get(`${API_BASE_URL}/market/company/${symbol}`)
                 ]);
 
                 const processedData = klineRes.data.map(k => ({
@@ -103,9 +104,9 @@ const AIStockDashboard = () => {
         setLoading(true);
         try {
             const [portRes, notifRes, tradeRes] = await Promise.all([
-                axios.get('http://localhost:8000/autonomous/portfolio'),
-                axios.get('http://localhost:8000/autonomous/notifications'),
-                axios.get('http://localhost:8000/autonomous/trade-history')
+                axios.get(`${API_BASE_URL}/autonomous/portfolio`),
+                axios.get(`${API_BASE_URL}/autonomous/notifications`),
+                axios.get(`${API_BASE_URL}/autonomous/trade-history`)
             ]);
             setPortfolio(portRes.data);
             setNotifications(notifRes.data);
@@ -120,7 +121,7 @@ const AIStockDashboard = () => {
     const triggerTrade = async () => {
         setTrading(true);
         try {
-            await axios.post('http://localhost:8000/autonomous/trade');
+            await axios.post(`${API_BASE_URL}/autonomous/trade`);
             fetchData();
         } catch (error) {
             console.error("Error triggering trade", error);
@@ -151,7 +152,7 @@ const AIStockDashboard = () => {
                     <button
                         onClick={async () => {
                             try {
-                                await axios.post('http://localhost:8000/autonomous/new-day');
+                                await axios.post(`${API_BASE_URL}/autonomous/new-day`);
                                 fetchData();
                             } catch (e) {
                                 console.error("Error simulating new day", e);

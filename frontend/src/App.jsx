@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import Layout from './components/Layout';
 import Dashboard from './components/Dashboard';
@@ -8,13 +8,15 @@ import MarketView from './components/MarketView';
 import SettingsView from './components/SettingsView';
 import NewsView from './components/NewsView';
 import AIStockDashboard from './components/AIStockDashboard';
+import { API_BASE_URL } from './config';
 
 function App() {
-  React.useEffect(() => {
+  // Polling for AI updates (Background Process)
+  useEffect(() => {
     const runPolling = async () => {
       try {
         // 1. Get Settings for Polling Rate
-        const settingsRes = await fetch('http://localhost:8000/settings');
+        const settingsRes = await fetch(`${API_BASE_URL}/settings`);
         const settings = await settingsRes.json();
         const intervalMinutes = settings.polling_interval || 5;
 
@@ -22,11 +24,13 @@ function App() {
 
         const poll = async () => {
           try {
-            console.log("Running Scheduled AI Scan...");
-            // Trigger News Analysis
-            await fetch('http://localhost:8000/autonomous/analyze-news', { method: 'POST' });
-            // Trigger Trading Cycle (includes intraday checks)
-            await fetch('http://localhost:8000/autonomous/trade', { method: 'POST' });
+            if (settings.autonomous_mode) {
+              console.log("Running Scheduled AI Scan...");
+              // Trigger News Analysis
+              await fetch(`${API_BASE_URL}/autonomous/analyze-news`, { method: 'POST' });
+              // Trigger Trading Cycle (includes intraday checks)
+              await fetch(`${API_BASE_URL}/autonomous/trade`, { method: 'POST' });
+            }
           } catch (e) {
             console.error("Polling Error:", e);
           }
