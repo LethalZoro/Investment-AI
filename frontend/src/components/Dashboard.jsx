@@ -137,14 +137,14 @@ const Dashboard = () => {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <StatCard
                     title="Total Net Worth"
-                    value={`PKR ${portfolio.total_value.toLocaleString()}`}
+                    value={`PKR ${portfolio?.summary?.total_value?.toLocaleString() || '0'}`}
                     subtext="+2.4% from yesterday"
                     icon={Wallet}
                     trend="up"
                 />
                 <StatCard
                     title="Cash Balance"
-                    value={`PKR ${portfolio.cash_balance.toLocaleString()}`}
+                    value={`PKR ${portfolio?.summary?.cash_balance?.toLocaleString() || '0'}`}
                     subtext="Available for trade"
                     icon={DollarSign}
                     trend="up"
@@ -152,8 +152,8 @@ const Dashboard = () => {
                 />
                 <StatCard
                     title="Holdings Value"
-                    value={`PKR ${portfolio.holdings_value.toLocaleString()}`}
-                    subtext={`${portfolio.holdings.length} Active Positions`}
+                    value={`PKR ${portfolio?.summary?.holdings_value?.toLocaleString() || '0'}`}
+                    subtext={`${portfolio?.holdings?.length || 0} Active Positions`}
                     icon={Activity}
                     trend="up"
                 />
@@ -206,7 +206,7 @@ const Dashboard = () => {
                                     <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[index % COLORS.length] }}></div>
                                     <span className="text-text-secondary">{entry.name}</span>
                                 </div>
-                                <span className="font-medium text-white">{((entry.value / portfolio.holdings_value) * 100).toFixed(1)}%</span>
+                                <span className="font-medium text-white">{((entry.value / (portfolio?.summary?.holdings_value || 1)) * 100).toFixed(1)}%</span>
                             </div>
                         ))}
                     </div>
@@ -245,8 +245,8 @@ const Dashboard = () => {
                         )}
                     </div>
                     <div className="mt-4 pt-4 border-t border-slate-700 flex justify-between text-sm text-text-secondary">
-                        <span>Budget Used: <span className="text-white">PKR {(plan.todays_budget - plan.remaining_cash).toLocaleString()}</span></span>
-                        <span>Remaining: <span className="text-secondary font-bold">PKR {plan.remaining_cash?.toLocaleString()}</span></span>
+                        <span>Budget Used: <span className="text-white">PKR {((plan?.todays_budget || 0) - (plan?.remaining_cash || 0)).toLocaleString()}</span></span>
+                        <span>Remaining: <span className="text-secondary font-bold">PKR {plan?.remaining_cash?.toLocaleString() || '0'}</span></span>
                     </div>
                 </div>
             )}
