@@ -1,0 +1,402 @@
+import React, { useState, useEffect } from 'react';
+import axios from 'axios';
+import { TrendingUp, TrendingDown, DollarSign, Activity, History, RefreshCw, X, ChevronDown } from 'lucide-react';
+import { ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+
+// Stock Detail Modal Component (reused from MarketView)
+const StockDetailModal = ({ symbol, onClose }) => {
+    const [klines, setKlines] = useState([]);
+    const [info, setInfo] = useState(null);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const fetchData = async () => {
+            try {
+                const [klineRes, infoRes] = await Promise.all([
+                    axios.get(`http://localhost:8000/market/klines/${symbol}?timeframe=1d`),
+                    axios.get(`http://localhost:8000/market/company/${symbol}`)
+                ]);
+
+                const processedData = klineRes.data.map(k => ({
+                    date: new Date(k.timestamp).toLocaleDateString(),
+                    price: k.close,
+                    volume: k.volume
+                }));
+
+                setKlines(processedData);
+                setInfo(infoRes.data);
+            } catch (error) {
+                console.error("Error fetching details", error);
+            } finally {
+                setLoading(false);
+            }
+        };
+        if (symbol) fetchData();
+    }, [symbol]);
+
+    if (!symbol) return null;
+
+    return (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+            <div className="card w-full max-w-4xl max-h-[90vh] overflow-y-auto relative animate-fade-in">
+                <button onClick={onClose} className="absolute top-4 right-4 text-text-secondary hover:text-white">
+                    <X className="w-6 h-6" />
+                </button>
+
+                {loading ? (
+                    <div className="h-64 flex items-center justify-center text-primary animate-pulse">Loading Details...</div>
+                ) : (
+                    <div className="space-y-6">
+                        <div>
+                            <h2 className="text-3xl font-bold text-white flex items-center gap-3">
+                                {symbol}
+                                {info?.financialStats?.marketCap && (
+                                    <span className="text-sm font-normal px-2 py-1 bg-slate-800 rounded text-text-secondary">
+                                        Cap: {info.financialStats.marketCap.raw}
+                                    </span>
+                                )}
+                            </h2>
+                            <p className="text-text-secondary mt-2">{info?.businessDescription?.substring(0, 150)}...</p>
+                        </div>
+
+                        <div className="h-[400px] w-full bg-slate-900/50 rounded-lg p-4 border border-slate-700">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <ComposedChart data={klines}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                                    <XAxis dataKey="date" stroke="#94a3b8" tick={{ fontSize: 12 }} />
+                                    <YAxis yAxisId="left" stroke="#94a3b8" domain={['auto', 'auto']} tick={{ fontSize: 12 }} />
+                                    <YAxis yAxisId="right" orientation="right" stroke="#64748b" tick={{ fontSize: 12 }} />
+                                    <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#f8fafc' }} />
+                                    <Bar yAxisId="right" dataKey="volume" fill="#3b82f6" opacity={0.3} />
+                                    <Line yAxisId="left" type="monotone" dataKey="price" stroke="#10b981" strokeWidth={2} dot={false} />
+                                </ComposedChart>
+                            </ResponsiveContainer>
+                        </div>
+
+                        {info?.keyPeople && (
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                {info.keyPeople.slice(0, 3).map((p, idx) => (
+                                    <div key={idx} className="bg-slate-800/50 p-3 rounded border border-slate-700">
+                                        <div className="text-xs text-text-muted uppercase">{p.position}</div>
+                                        <div className="font-medium text-white">{p.name}</div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+};
+
+const AIStockDashboard = () => {
+    const [portfolio, setPortfolio] = useState({ holdings: [], summary: { total_value: 0, total_pnl: 0 } });
+    const [notifications, setNotifications] = useState([]);
+    const [tradeHistory, setTradeHistory] = useState([]);
+    const [loading, setLoading] = useState(false);
+    const [trading, setTrading] = useState(false);
+    const [selectedSymbol, setSelectedSymbol] = useState(null);
+    const [showTradeHistory, setShowTradeHistory] = useState(false);
+
+    const fetchData = async () => {
+        setLoading(true);
+        try {
+            const [portRes, notifRes, tradeRes] = await Promise.all([
+                axios.get('http://localhost:8000/autonomous/portfolio'),
+                axios.get('http://localhost:8000/autonomous/notifications'),
+                axios.get('http://localhost:8000/autonomous/trade-history')
+            ]);
+            setPortfolio(portRes.data);
+            setNotifications(notifRes.data);
+            setTradeHistory(tradeRes.data);
+        } catch (error) {
+            console.error("Error fetching AI data", error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const triggerTrade = async () => {
+        setTrading(true);
+        try {
+            await axios.post('http://localhost:8000/autonomous/trade');
+            fetchData();
+        } catch (error) {
+            console.error("Error triggering trade", error);
+        } finally {
+            setTrading(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchData();
+        const interval = setInterval(fetchData, 10000);
+        return () => clearInterval(interval);
+    }, []);
+
+    // Filter trades to only show those with P&L (sells)
+    const pnlTrades = tradeHistory.filter(t => t.pnl != null);
+
+    return (
+        <div className="space-y-6 animate-slide-up">
+            <div className="flex justify-between items-center">
+                <div>
+                    <h1 className="text-3xl font-bold text-white flex items-center gap-3">
+                        <Activity className="w-8 h-8 text-accent" /> AI Bot Dashboard
+                    </h1>
+                    <p className="text-text-secondary mt-1">Autonomous trading performance and activity log.</p>
+                </div>
+                <div className="flex gap-2">
+                    <button
+                        onClick={async () => {
+                            try {
+                                await axios.post('http://localhost:8000/autonomous/new-day');
+                                fetchData();
+                            } catch (e) {
+                                console.error("Error simulating new day", e);
+                            }
+                        }}
+                        className="btn btn-secondary flex items-center gap-2"
+                    >
+                        <DollarSign className="w-4 h-4" />
+                        Simulate New Day
+                    </button>
+                    <button
+                        onClick={triggerTrade}
+                        disabled={trading}
+                        className="btn btn-accent flex items-center gap-2"
+                    >
+                        <RefreshCw className={`w-4 h-4 ${trading ? 'animate-spin' : ''}`} />
+                        {trading ? 'Running Cycle...' : 'Force Trade Cycle'}
+                    </button>
+                </div>
+            </div>
+
+            {/* Summary Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                <div className="card bg-gradient-to-br from-surface to-surface/50">
+                    <div className="flex items-center gap-4">
+                        <div className="p-3 bg-primary/10 rounded-lg text-primary">
+                            <DollarSign className="w-6 h-6" />
+                        </div>
+                        <div>
+                            <p className="text-text-secondary text-sm">Net Worth</p>
+                            <p className="text-2xl font-bold text-white">
+                                Rs. {portfolio.summary.total_value.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="card bg-gradient-to-br from-surface to-surface/50">
+                    <div className="flex items-center gap-4">
+                        <div className="p-3 bg-emerald-500/10 rounded-lg text-emerald-500">
+                            <DollarSign className="w-6 h-6" />
+                        </div>
+                        <div>
+                            <p className="text-text-secondary text-sm">Available Budget</p>
+                            <p className="text-2xl font-bold text-white">
+                                Rs. {portfolio.summary.cash_balance?.toLocaleString(undefined, { minimumFractionDigits: 2 }) || '0.00'}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="card bg-gradient-to-br from-surface to-surface/50">
+                    <div className="flex items-center gap-4">
+                        <div className={`p-3 rounded-lg ${portfolio.summary.total_pnl >= 0 ? 'bg-secondary/10 text-secondary' : 'bg-danger/10 text-danger'}`}>
+                            {portfolio.summary.total_pnl >= 0 ? <TrendingUp className="w-6 h-6" /> : <TrendingDown className="w-6 h-6" />}
+                        </div>
+                        <div>
+                            <p className="text-text-secondary text-sm">Positions PnL</p>
+                            <p className={`text-2xl font-bold ${portfolio.summary.total_pnl >= 0 ? 'text-secondary' : 'text-danger'}`}>
+                                {portfolio.summary.total_pnl >= 0 ? '+' : ''}Rs. {portfolio.summary.total_pnl.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="card bg-gradient-to-br from-surface to-surface/50">
+                    <div className="flex items-center gap-4">
+                        <div className="p-3 bg-accent/10 rounded-lg text-accent">
+                            <Activity className="w-6 h-6" />
+                        </div>
+                        <div>
+                            <p className="text-text-secondary text-sm">Active Positions</p>
+                            <p className="text-2xl font-bold text-white">
+                                {portfolio.holdings.length}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* Overall Performance Card */}
+            <div className="card bg-gradient-to-br from-primary/5 to-secondary/5 border border-primary/20">
+                <h2 className="text-xl font-bold text-white mb-4">Overall Performance</h2>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                    <div>
+                        <p className="text-text-secondary text-sm mb-1">Initial Capital</p>
+                        <p className="text-2xl font-bold text-white">
+                            Rs. {(portfolio.summary.initial_capital || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </p>
+                    </div>
+                    <div>
+                        <p className="text-text-secondary text-sm mb-1">Current Net Worth</p>
+                        <p className="text-2xl font-bold text-white">
+                            Rs. {portfolio.summary.total_value.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </p>
+                    </div>
+                    <div>
+                        <p className="text-text-secondary text-sm mb-1">Overall P&L</p>
+                        <p className={`text-2xl font-bold ${(portfolio.summary.overall_pnl || 0) >= 0 ? 'text-secondary' : 'text-danger'}`}>
+                            {(portfolio.summary.overall_pnl || 0) >= 0 ? '+' : ''}Rs. {(portfolio.summary.overall_pnl || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </p>
+                    </div>
+                    <div>
+                        <p className="text-text-secondary text-sm mb-1">Return %</p>
+                        <p className={`text-2xl font-bold ${(portfolio.summary.overall_pnl_percent || 0) >= 0 ? 'text-secondary' : 'text-danger'}`}>
+                            {(portfolio.summary.overall_pnl_percent || 0) >= 0 ? '+' : ''}{(portfolio.summary.overall_pnl_percent || 0).toFixed(2)}%
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Portfolio Table */}
+                <div className="lg:col-span-2 card space-y-4">
+                    <h2 className="text-xl font-bold text-white mb-4">Current Holdings</h2>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left">
+                            <thead className="text-text-secondary border-b border-slate-700">
+                                <tr>
+                                    <th className="pb-3">Symbol</th>
+                                    <th className="pb-3">Qty</th>
+                                    <th className="pb-3">Avg Cost</th>
+                                    <th className="pb-3">Current</th>
+                                    <th className="pb-3">PnL</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-700">
+                                {portfolio.holdings.length === 0 ? (
+                                    <tr>
+                                        <td colSpan="5" className="py-4 text-center text-text-secondary">No active positions.</td>
+                                    </tr>
+                                ) : (
+                                    portfolio.holdings.map((item) => (
+                                        <tr
+                                            key={item.symbol}
+                                            className="group hover:bg-slate-800/50 transition-colors cursor-pointer"
+                                            onClick={() => setSelectedSymbol(item.symbol)}
+                                        >
+                                            <td className="py-4 font-bold text-white">{item.symbol}</td>
+                                            <td className="py-4 text-text-primary">{item.quantity}</td>
+                                            <td className="py-4 text-text-secondary">Rs. {item.avg_cost.toFixed(2)}</td>
+                                            <td className="py-4 text-text-primary">Rs. {item.current_price.toFixed(2)}</td>
+                                            <td className={`py-4 font-bold ${item.pnl >= 0 ? 'text-secondary' : 'text-danger'}`}>
+                                                {item.pnl >= 0 ? '+' : ''}{item.pnl.toFixed(2)} ({item.pnl_percent.toFixed(1)}%)
+                                            </td>
+                                        </tr>
+                                    ))
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                {/* Notifications Log */}
+                <div className="card space-y-4 h-[500px] flex flex-col">
+                    <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                        <History className="w-5 h-5 text-text-secondary" /> Activity Log
+                    </h2>
+                    <div className="flex-1 overflow-y-auto space-y-3 pr-2 custom-scrollbar">
+                        {notifications.length === 0 ? (
+                            <p className="text-text-secondary text-center py-4">No recent activity.</p>
+                        ) : (
+                            notifications.map((note) => (
+                                <div key={note.id} className="p-3 rounded-lg bg-slate-800/50 border border-slate-700 hover:border-slate-600 transition-colors">
+                                    <div className="flex justify-between items-start mb-1">
+                                        <span className={`text-xs font-bold px-2 py-0.5 rounded ${note.type === 'TRADE' ? 'bg-accent/20 text-accent' : 'bg-primary/20 text-primary'}`}>
+                                            {note.type}
+                                        </span>
+                                        <span className="text-xs text-text-secondary">
+                                            {new Date(note.timestamp + "Z").toLocaleTimeString('en-US', { timeZone: 'Asia/Karachi' })}
+                                        </span>
+                                    </div>
+                                    <h4 className="font-medium text-white text-sm">{note.title}</h4>
+                                    <p className="text-xs text-text-secondary mt-1">{note.message}</p>
+                                </div>
+                            ))
+                        )}
+                    </div>
+                </div>
+            </div>
+
+            {/* P&L History - Collapsible, at end */}
+            <div className="card">
+                <button
+                    onClick={() => setShowTradeHistory(!showTradeHistory)}
+                    className="w-full flex items-center justify-between text-left"
+                >
+                    <h2 className="text-xl font-bold text-white">P&L History ({pnlTrades.length} transactions)</h2>
+                    <ChevronDown className={`w-5 h-5 text-text-secondary transition-transform ${showTradeHistory ? 'rotate-180' : ''}`} />
+                </button>
+
+                {showTradeHistory && (
+                    <div className="overflow-x-auto mt-4">
+                        <table className="w-full text-left text-sm">
+                            <thead className="text-text-secondary border-b border-slate-700">
+                                <tr>
+                                    <th className="pb-3">Date/Time</th>
+                                    <th className="pb-3">Symbol</th>
+                                    <th className="pb-3 text-right">Quantity</th>
+                                    <th className="pb-3 text-right">Sell Price</th>
+                                    <th className="pb-3 text-right">P&L</th>
+                                    <th className="pb-3">Reason</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-700">
+                                {pnlTrades.length === 0 ? (
+                                    <tr>
+                                        <td colSpan="6" className="py-4 text-center text-text-secondary">No P&L transactions yet.</td>
+                                    </tr>
+                                ) : (
+                                    pnlTrades.map((trade, idx) => (
+                                        <tr key={idx} className="hover:bg-slate-800/30 transition-colors">
+                                            <td className="py-3 text-text-muted">
+                                                {new Date(trade.timestamp + "Z").toLocaleString('en-US', {
+                                                    timeZone: 'Asia/Karachi',
+                                                    month: 'short',
+                                                    day: 'numeric',
+                                                    hour: '2-digit',
+                                                    minute: '2-digit'
+                                                })}
+                                            </td>
+                                            <td className="py-3 font-medium text-white">{trade.symbol}</td>
+                                            <td className="py-3 text-right text-text-primary">{trade.quantity}</td>
+                                            <td className="py-3 text-right text-text-secondary">Rs. {trade.price.toFixed(2)}</td>
+                                            <td className={`py-3 text-right font-bold ${trade.pnl >= 0 ? 'text-secondary' : 'text-danger'}`}>
+                                                {trade.pnl >= 0 ? '+' : ''}Rs. {trade.pnl.toFixed(2)}
+                                            </td>
+                                            <td className="py-3 text-text-muted text-xs max-w-xs truncate" title={trade.reason}>
+                                                {trade.reason || 'N/A'}
+                                            </td>
+                                        </tr>
+                                    ))
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+            </div>
+
+            {/* Stock Detail Modal */}
+            {selectedSymbol && (
+                <StockDetailModal symbol={selectedSymbol} onClose={() => setSelectedSymbol(null)} />
+            )}
+        </div>
+    );
+};
+
+export default AIStockDashboard;
