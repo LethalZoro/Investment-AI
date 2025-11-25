@@ -1,64 +1,89 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Search, TrendingUp, TrendingDown, Activity, BarChart2, X } from 'lucide-react';
+import { ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { API_BASE_URL } from '../config';
 
 const StockDetailModal = ({ symbol, onClose }) => {
-    const [details, setDetails] = useState(null);
+    const [klines, setKlines] = useState([]);
+    const [info, setInfo] = useState(null);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        const fetchDetails = async () => {
+        const fetchData = async () => {
             try {
-                const response = await axios.get(`${API_BASE_URL}/market/quote/${symbol}`);
-                setDetails(response.data);
+                const [klineRes, infoRes] = await Promise.all([
+                    axios.get(`${API_BASE_URL}/market/klines/${symbol}?timeframe=1d`),
+                    axios.get(`${API_BASE_URL}/market/company/${symbol}`)
+                ]);
+
+                const processedData = klineRes.data.map(k => ({
+                    date: new Date(k.timestamp).toLocaleDateString(),
+                    price: k.close,
+                    volume: k.volume
+                }));
+
+                setKlines(processedData);
+                setInfo(infoRes.data);
             } catch (error) {
-                console.error("Error fetching stock details:", error);
+                console.error("Error fetching details", error);
             } finally {
                 setLoading(false);
             }
         };
-        fetchDetails();
+        if (symbol) fetchData();
     }, [symbol]);
 
     if (!symbol) return null;
 
     return (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
-            <div className="card w-96 relative animate-fade-in">
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+            <div className="card w-full max-w-4xl max-h-[90vh] overflow-y-auto relative animate-fade-in">
                 <button onClick={onClose} className="absolute top-4 right-4 text-text-secondary hover:text-white">
-                    <X className="w-5 h-5" />
+                    <X className="w-6 h-6" />
                 </button>
-                <h2 className="text-xl font-bold text-white mb-4">{symbol} Details</h2>
+
                 {loading ? (
-                    <div className="text-center p-4 text-primary animate-pulse">Loading...</div>
-                ) : details ? (
-                    <div className="space-y-4">
-                        <div className="flex justify-between items-center">
-                            <span className="text-text-secondary">Price</span>
-                            <span className="text-2xl font-bold text-white">{details.price}</span>
-                        </div>
-                        <div className="flex justify-between items-center">
-                            <span className="text-text-secondary">Change</span>
-                            <span className={`font-bold ${details.changePercent >= 0 ? 'text-secondary' : 'text-danger'}`}>
-                                {details.changePercent}%
-                            </span>
-                        </div>
-                        <div className="flex justify-between items-center">
-                            <span className="text-text-secondary">Volume</span>
-                            <span className="text-white">{details.volume?.toLocaleString()}</span>
-                        </div>
-                        <div className="flex justify-between items-center">
-                            <span className="text-text-secondary">High</span>
-                            <span className="text-white">{details.high}</span>
-                        </div>
-                        <div className="flex justify-between items-center">
-                            <span className="text-text-secondary">Low</span>
-                            <span className="text-white">{details.low}</span>
-                        </div>
-                    </div>
+                    <div className="h-64 flex items-center justify-center text-primary animate-pulse">Loading Details...</div>
                 ) : (
-                    <div className="text-center text-danger">Failed to load details</div>
+                    <div className="space-y-6">
+                        <div>
+                            <h2 className="text-3xl font-bold text-white flex items-center gap-3">
+                                {symbol}
+                                {info?.financialStats?.marketCap && (
+                                    <span className="text-sm font-normal px-2 py-1 bg-slate-800 rounded text-text-secondary">
+                                        Cap: {info.financialStats.marketCap.raw}
+                                    </span>
+                                )}
+                            </h2>
+                            <p className="text-text-secondary mt-2">{info?.businessDescription?.substring(0, 150)}...</p>
+                        </div>
+
+                        <div className="h-[400px] w-full bg-slate-900/50 rounded-lg p-4 border border-slate-700">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <ComposedChart data={klines}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                                    <XAxis dataKey="date" stroke="#94a3b8" tick={{ fontSize: 12 }} />
+                                    <YAxis yAxisId="left" stroke="#94a3b8" domain={['auto', 'auto']} tick={{ fontSize: 12 }} />
+                                    <YAxis yAxisId="right" orientation="right" stroke="#64748b" tick={{ fontSize: 12 }} />
+                                    <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#f8fafc' }} />
+                                    <Bar yAxisId="right" dataKey="volume" fill="#3b82f6" opacity={0.3} />
+                                    <Line yAxisId="left" type="monotone" dataKey="price" stroke="#10b981" strokeWidth={2} dot={false} />
+                                </ComposedChart>
+                            </ResponsiveContainer>
+                        </div>
+
+                        {info?.keyPeople && (
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                {info.keyPeople.slice(0, 3).map((p, idx) => (
+                                    <div key={idx} className="bg-slate-800/50 p-3 rounded border border-slate-700">
+                                        <div className="text-xs text-text-muted uppercase">{p.position}</div>
+                                        <div className="font-medium text-white">{p.name}</div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
                 )}
             </div>
         </div>
