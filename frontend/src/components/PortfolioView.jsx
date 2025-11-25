@@ -126,8 +126,8 @@ const PortfolioView = () => {
                 </div>
                 <div className="text-right">
                     <p className="text-sm text-text-secondary">Total PnL</p>
-                    <p className={`text-2xl font-bold ${portfolio.summary.total_pnl >= 0 ? 'text-secondary' : 'text-danger'}`}>
-                        {portfolio.summary.total_pnl >= 0 ? '+' : ''}PKR {portfolio.summary.total_pnl?.toLocaleString()}
+                    <p className={`text-2xl font-bold ${portfolio?.summary?.total_pnl >= 0 ? 'text-secondary' : 'text-danger'}`}>
+                        {portfolio?.summary?.total_pnl >= 0 ? '+' : ''}PKR {portfolio?.summary?.total_pnl?.toLocaleString() || '0'}
                     </p>
                 </div>
             </div>

@@ -19,10 +19,14 @@ class PortfolioEngine:
         holdings_value = 0.0
         holdings_summary = []
 
+        total_pnl = 0.0
+        
         for item in items:
             current_price = market_data.get_live_price(item.symbol)
             market_value = item.quantity * current_price
             holdings_value += market_value
+            item_pnl = market_value - (item.quantity * item.avg_cost)
+            total_pnl += item_pnl
             
             holdings_summary.append({
                 "symbol": item.symbol,
@@ -30,17 +34,20 @@ class PortfolioEngine:
                 "avg_cost": item.avg_cost,
                 "current_price": current_price,
                 "market_value": market_value,
-                "pnl": market_value - (item.quantity * item.avg_cost),
+                "pnl": item_pnl,
                 "strategy": item.strategy_tag
             })
 
         total_value += holdings_value
 
         return {
-            "total_value": total_value,
-            "cash_balance": settings.cash_balance,
-            "holdings_value": holdings_value,
-            "holdings": holdings_summary
+            "holdings": holdings_summary,
+            "summary": {
+                "total_value": total_value,
+                "cash_balance": settings.cash_balance,
+                "holdings_value": holdings_value,
+                "total_pnl": total_pnl
+            }
         }
 
     def check_risk_exposure(self):
