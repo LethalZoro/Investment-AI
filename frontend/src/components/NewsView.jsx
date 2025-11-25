@@ -11,7 +11,7 @@ const NewsView = () => {
     const fetchAlerts = async () => {
         try {
             setLoading(true);
-            const response = await axios.get(`${API_BASE_URL}/news/alerts`);
+            const response = await axios.get(`${API_BASE_URL}/autonomous/alerts`);
             setAlerts(response.data);
         } catch (error) {
             console.error("Error fetching alerts:", error);
@@ -23,7 +23,7 @@ const NewsView = () => {
     const triggerAnalysis = async () => {
         try {
             setAnalyzing(true);
-            await axios.post(`${API_BASE_URL}/news/analyze`);
+            await axios.post(`${API_BASE_URL}/autonomous/analyze-news`);
             await fetchAlerts();
         } catch (error) {
             console.error("Error triggering analysis:", error);

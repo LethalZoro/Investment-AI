@@ -37,7 +37,7 @@ const ChatInterface = () => {
                 context_type: dataSource
             });
 
-            const botMsg = { role: 'bot', content: response.data.response };
+            const botMsg = { role: 'bot', content: response.data.answer };
             setMessages(prev => [...prev, botMsg]);
         } catch (error) {
             console.error("Chat error:", error);
