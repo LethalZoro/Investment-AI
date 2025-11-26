@@ -157,7 +157,7 @@ const SettingsView = () => {
                 <div className="card space-y-6">
                     <div className="flex items-center gap-2 mb-4 border-b border-slate-700 pb-4">
                         <Cpu className="text-secondary w-5 h-5" />
-                        <h3 className="text-lg font-bold text-white">Trading Hours (PKR Time)</h3>
+                        <h3 className="text-lg font-bold text-white">Trading Hours (PKT)</h3>
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div>

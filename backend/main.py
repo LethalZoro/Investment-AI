@@ -6,7 +6,9 @@ from pydantic import BaseModel
 from typing import List, Optional
 from dotenv import load_dotenv
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
+import pytz
+from apscheduler.schedulers.background import BackgroundScheduler
 
 # Explicitly load .env from the backend directory
 env_path = os.path.join(os.path.dirname(__file__), ".env")
@@ -61,15 +63,18 @@ def get_db():
 @app.post("/autonomous/analyze-news")
 def analyze_news(db: Session = Depends(get_db)):
     """Triggers the AI News Analysis cycle."""
-    # Check Trading Hours
+    # Check Trading Hours (PKT)
     settings = db.query(UserSettings).first()
     if settings:
-        now = datetime.now().strftime("%H:%M")
+        pkt_tz = pytz.timezone('Asia/Karachi')
+        now_pkt = datetime.now(pkt_tz)
+        current_time_str = now_pkt.strftime("%H:%M")
+        
         start_time = settings.trading_start_time or "09:30"
         end_time = settings.trading_end_time or "15:30"
         
-        if not (start_time <= now <= end_time):
-            print(f"[NEWS ANALYSIS] Skipping: Current time {now} is outside trading hours ({start_time} - {end_time})")
+        if not (start_time <= current_time_str <= end_time):
+            print(f"[NEWS ANALYSIS] Skipping: Current time {current_time_str} (PKT) is outside trading hours ({start_time} - {end_time})")
             return {"message": "Skipped: Outside trading hours", "alerts_generated": 0}
 
     print("DEBUG: Starting News Analysis...")
@@ -132,6 +137,72 @@ def get_db():
 @app.on_event("startup")
 def on_startup():
     init_db()
+    start_scheduler()
+
+def start_scheduler():
+    """Starts the background scheduler for autonomous trading."""
+    scheduler = BackgroundScheduler()
+    # Run every 1 minute to check if we need to trade
+    scheduler.add_job(run_scheduled_trading_cycle, 'interval', minutes=1)
+    scheduler.start()
+    print("DEBUG: Background Scheduler Started")
+
+def run_scheduled_trading_cycle():
+    """
+    Checks if it's time to run the trading cycle based on user settings.
+    This runs every minute but only executes the trade logic if the polling interval has passed.
+    """
+    db = SessionLocal()
+    try:
+        settings = db.query(UserSettings).first()
+        if not settings or not settings.autonomous_mode:
+            return # Auto mode disabled
+
+        # 1. Check Trading Hours (PKT)
+        pkt_tz = pytz.timezone('Asia/Karachi')
+        now_pkt = datetime.now(pkt_tz)
+        current_time_str = now_pkt.strftime("%H:%M")
+        
+        start_time = settings.trading_start_time or "09:30"
+        end_time = settings.trading_end_time or "15:30"
+        
+        if not (start_time <= current_time_str <= end_time):
+            # print(f"[AUTO] Outside trading hours: {current_time_str}")
+            return
+
+        # 2. Check Polling Interval
+        # If last_run_date is None, run immediately
+        # Else, check if enough minutes have passed
+        should_run = False
+        if not settings.last_run_date:
+            should_run = True
+        else:
+            # Ensure last_run_date is timezone aware or handle naive comparison
+            # We'll assume last_run_date is stored as UTC in DB (default), so we compare with UTC now
+            # OR simpler: just check total seconds difference
+            last_run = settings.last_run_date
+            if last_run.tzinfo is None:
+                last_run = pytz.utc.localize(last_run)
+            
+            now_utc = datetime.now(pytz.utc)
+            minutes_diff = (now_utc - last_run).total_seconds() / 60
+            
+            if minutes_diff >= settings.polling_interval:
+                should_run = True
+        
+        if should_run:
+            print(f"[AUTO] Triggering Trading Cycle at {current_time_str} PKT")
+            agent = AutonomousAgent(db)
+            agent.run_trading_cycle()
+            
+            # Update last run time
+            settings.last_run_date = datetime.now(pytz.utc)
+            db.commit()
+            
+    except Exception as e:
+        print(f"[AUTO] Scheduler Error: {e}")
+    finally:
+        db.close()
 
 @app.get("/")
 def read_root():
@@ -154,7 +225,8 @@ def record_daily_snapshot(db: Session):
 
     # Calculate current values
     engine = PortfolioEngine(db)
-    summary = engine.get_portfolio_summary()
+    portfolio_data = engine.get_portfolio_summary()
+    summary = portfolio_data["summary"]
     
     new_record = PortfolioHistory(
         total_value=summary["total_value"],
