@@ -210,7 +210,7 @@ const AIStockDashboard = () => {
                             {portfolio.summary.total_pnl >= 0 ? <TrendingUp className="w-6 h-6" /> : <TrendingDown className="w-6 h-6" />}
                         </div>
                         <div>
-                            <p className="text-text-secondary text-sm">Positions PnL</p>
+                            <p className="text-text-secondary text-sm">Unrealized PnL</p>
                             <p className={`text-2xl font-bold ${portfolio.summary.total_pnl >= 0 ? 'text-secondary' : 'text-danger'}`}>
                                 {portfolio.summary.total_pnl >= 0 ? '+' : ''}Rs. {portfolio.summary.total_pnl.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                             </p>
@@ -250,9 +250,9 @@ const AIStockDashboard = () => {
                         </p>
                     </div>
                     <div>
-                        <p className="text-text-secondary text-sm mb-1">Overall P&L</p>
-                        <p className={`text-2xl font-bold ${(portfolio.summary.overall_pnl || 0) >= 0 ? 'text-secondary' : 'text-danger'}`}>
-                            {(portfolio.summary.overall_pnl || 0) >= 0 ? '+' : ''}Rs. {(portfolio.summary.overall_pnl || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        <p className="text-text-secondary text-sm mb-1">Realized PnL</p>
+                        <p className={`text-2xl font-bold ${(portfolio.summary.realized_pnl || 0) >= 0 ? 'text-secondary' : 'text-danger'}`}>
+                            {(portfolio.summary.realized_pnl || 0) >= 0 ? '+' : ''}Rs. {(portfolio.summary.realized_pnl || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                         </p>
                     </div>
                     <div>

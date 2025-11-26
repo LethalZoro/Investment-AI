@@ -553,7 +553,8 @@ def get_ai_portfolio_data(db: Session):
             "total_pnl": total_pnl,
             "initial_capital": initial_capital,
             "overall_pnl": overall_pnl,
-            "overall_pnl_percent": overall_pnl_percent
+            "overall_pnl_percent": overall_pnl_percent,
+            "realized_pnl": total_realized_pnl
         }
     }
 
