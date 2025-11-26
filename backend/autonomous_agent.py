@@ -1,5 +1,6 @@
 import json
 import os
+import pytz
 from datetime import datetime
 from sqlalchemy.orm import Session
 from typing import List, Dict
@@ -45,13 +46,16 @@ class AutonomousAgent:
             self.db.add(settings)
             self.db.commit()
             
-        # Check Trading Hours
-        now = datetime.now().strftime("%H:%M")
+        # Check Trading Hours (PKT)
+        pkt_tz = pytz.timezone('Asia/Karachi')
+        now_pkt = datetime.now(pkt_tz)
+        current_time_str = now_pkt.strftime("%H:%M")
+        
         start_time = settings.trading_start_time or "09:30"
         end_time = settings.trading_end_time or "15:30"
         
-        if not (start_time <= now <= end_time):
-            print(f"[TRADING CYCLE] Skipping: Current time {now} is outside trading hours ({start_time} - {end_time})")
+        if not (start_time <= current_time_str <= end_time):
+            print(f"[TRADING CYCLE] Skipping: Current time {current_time_str} (PKT) is outside trading hours ({start_time} - {end_time})")
             return []
 
         # 2. Monitor Existing Portfolio
