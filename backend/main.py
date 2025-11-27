@@ -119,13 +119,7 @@ async def global_exception_handler(request, exc):
         content={"message": "Internal Server Error", "detail": str(exc)},
     )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
 
 def get_db():
     db = SessionLocal()
@@ -144,6 +138,10 @@ def start_scheduler():
     scheduler = BackgroundScheduler()
     # Run every 1 minute to check if we need to trade
     scheduler.add_job(run_scheduled_trading_cycle, 'interval', minutes=1)
+    
+    # Run Daily Budget Injection at 9:00 AM PKT
+    scheduler.add_job(run_daily_budget_injection, 'cron', hour=9, minute=0, timezone='Asia/Karachi')
+    
     scheduler.start()
     print("DEBUG: Background Scheduler Started")
 
@@ -563,42 +561,66 @@ def get_ai_portfolio(db: Session = Depends(get_db)):
     """Returns the AI's current portfolio holdings with overall PnL metrics."""
     return get_ai_portfolio_data(db)
 
+def run_daily_budget_injection():
+    """Standalone function to inject daily budget."""
+    db = SessionLocal()
+    try:
+        settings = db.query(UserSettings).first()
+        if not settings:
+            settings = UserSettings()
+            db.add(settings)
+        
+        # Add daily budget
+        budget_to_add = settings.daily_trade_budget
+        settings.ai_cash_balance += budget_to_add
+        
+        # Track deposit in trade history for P&L calculation
+        from models import AITradeHistory
+        deposit_record = AITradeHistory(
+            symbol="DEPOSIT",
+            action="DEPOSIT",
+            quantity=0,
+            price=budget_to_add,
+            # total_value removed as it doesn't exist in model
+            pnl=None,
+            reason=f"Daily budget injection: Rs. {budget_to_add:,.2f}"
+        )
+        db.add(deposit_record)
+        
+        # Log notification
+        agent = AutonomousAgent(db)
+        agent._add_notification(
+            "New Day: Budget Injected", 
+            f"Added Rs. {budget_to_add:,.2f} to AI Cash Balance. New Balance: Rs. {settings.ai_cash_balance:,.2f}", 
+            "SYSTEM", 
+            [] 
+        )
+        
+        db.commit()
+        print(f"[DAILY JOB] Injected Rs. {budget_to_add}")
+        return {"added_budget": budget_to_add, "new_balance": settings.ai_cash_balance}
+    except Exception as e:
+        print(f"[DAILY JOB ERROR] {e}")
+        return None
+    finally:
+        db.close()
+
 @app.post("/autonomous/new-day")
 def simulate_new_day(db: Session = Depends(get_db)):
     """Simulates a new day: Adds daily budget to AI cash balance."""
-    settings = db.query(UserSettings).first()
-    if not settings:
-        settings = UserSettings()
-        db.add(settings)
+    # We can just call the standalone function, but we need to handle the DB session carefully.
+    # Since run_daily_budget_injection creates its own session, we can just call it.
+    # However, to reuse the dependency session if we wanted, we'd need to refactor further.
+    # For simplicity and safety with the scheduler, we'll let it use its own session logic 
+    # or just replicate the fix here if we want to keep using the dependency.
     
-    # Add daily budget
-    budget_to_add = settings.daily_trade_budget
-    settings.ai_cash_balance += budget_to_add
-    
-    # Track deposit in trade history for P&L calculation
-    from models import AITradeHistory
-    deposit_record = AITradeHistory(
-        symbol="DEPOSIT",
-        action="DEPOSIT",
-        quantity=0,
-        price=budget_to_add,
-        total_value=budget_to_add,
-        pnl=None,
-        reason=f"Daily budget injection: Rs. {budget_to_add:,.2f}"
-    )
-    db.add(deposit_record)
-    
-    # Log notification
-    agent = AutonomousAgent(db)
-    agent._add_notification(
-        "New Day: Budget Injected", 
-        f"Added Rs. {budget_to_add:,.2f} to AI Cash Balance. New Balance: Rs. {settings.ai_cash_balance:,.2f}", 
-        "SYSTEM", 
-        [] # No live list needed here, just DB
-    )
-    
-    db.commit()
-    return {"message": "New day simulated", "added_budget": budget_to_add, "new_balance": settings.ai_cash_balance}
+    # Actually, let's just use the logic directly here to avoid session conflicts if we were passing db,
+    # but since the scheduler needs it standalone, let's call the standalone function.
+    result = run_daily_budget_injection()
+    if result:
+        return {"message": "New day simulated", **result}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to simulate new day")
 
 @app.get("/autonomous/notifications")
 def get_ai_notifications(db: Session = Depends(get_db)):
