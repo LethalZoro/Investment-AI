@@ -3,9 +3,19 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
 
-DATABASE_URL = "sqlite:///./psx_copilot.db"
+import os
+from dotenv import load_dotenv
 
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+load_dotenv()
+
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./psx_copilot.db")
+
+if DATABASE_URL.startswith("sqlite"):
+    connect_args = {"check_same_thread": False}
+else:
+    connect_args = {}
+
+engine = create_engine(DATABASE_URL, connect_args=connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -93,6 +103,25 @@ class AIPortfolioItem(Base):
     current_price = Column(Float, default=0.0) # Cached price for quick PnL
     total_cost = Column(Float) # quantity * avg_cost
     purchased_at = Column(DateTime, default=datetime.utcnow) # Track when position was opened
+    user_reasoning = Column(String, nullable=True) # User's notes/reasoning for this position
+    
+    # AI Decision Tracking
+    last_decision = Column(String, default="HOLD") # HOLD, SELL, BUY_MORE
+    last_reason = Column(String, nullable=True)
+    last_confidence = Column(String, nullable=True) # HIGH, MEDIUM, LOW
+    last_analyzed = Column(DateTime, nullable=True)
+
+class AIRecommendation(Base):
+    __tablename__ = "ai_recommendations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    symbol = Column(String, index=True)
+    action = Column(String) # BUY, SELL
+    quantity = Column(Integer)
+    price = Column(Float)
+    reason = Column(String, nullable=True)
+    status = Column(String, default="PENDING") # PENDING, APPROVED, DENIED, EXECUTED
+    timestamp = Column(DateTime, default=datetime.utcnow)
     
 class AITradeHistory(Base):
     __tablename__ = "ai_trade_history"
@@ -112,7 +141,7 @@ class AINotification(Base):
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String)
     message = Column(String)
-    type = Column(String) # TRADE, ALERT, INFO
+    type = Column(String) # TRADE, ALERT, INFO, ACTION_REQUIRED
     timestamp = Column(DateTime, default=datetime.utcnow)
     is_read = Column(Boolean, default=False)
 

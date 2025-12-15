@@ -14,7 +14,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 env_path = os.path.join(os.path.dirname(__file__), ".env")
 load_dotenv(env_path)
 
-from models import SessionLocal, init_db, PortfolioItem, UserSettings, Transaction, PortfolioHistory, AIAlert, AIPortfolioItem, AINotification, AITradeHistory
+from models import SessionLocal, init_db, PortfolioItem, UserSettings, Transaction, PortfolioHistory, AIAlert, AIPortfolioItem, AINotification, AITradeHistory, AIRecommendation
 from portfolio_engine import PortfolioEngine
 from market_data import market_data
 from autonomous_agent import AutonomousAgent
@@ -479,6 +479,128 @@ def update_settings(update: SettingsUpdate, db: Session = Depends(get_db)):
     db.refresh(settings)
     return settings
 
+# --- Recommendation Routes ---
+@app.get("/autonomous/recommendations")
+def get_recommendations(db: Session = Depends(get_db)):
+    """Fetch pending recommendations."""
+    return db.query(AIRecommendation).filter(AIRecommendation.status == "PENDING").all()
+
+@app.post("/autonomous/recommendations/{rec_id}/{action}")
+def handle_recommendation(rec_id: int, action: str, db: Session = Depends(get_db)):
+    """Approve or Deny a recommendation."""
+    rec = db.query(AIRecommendation).filter(AIRecommendation.id == rec_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Recommendation not found")
+        
+    if action == "approve":
+        settings = db.query(UserSettings).first()
+        agent = AutonomousAgent(db)
+        
+        # Execute Trade
+        # Create empty notifications list for the function to populate
+        notifications = [] 
+        agent.execute_trade(
+            rec.symbol, 
+            rec.action, 
+            rec.quantity, 
+            rec.price, 
+            rec.reason, 
+            notifications, 
+            settings, 
+            recommendation_id=rec.id
+        )
+        rec.status = "APPROVED" # execute_trade will set to EXECUTED, but safe to update here too
+        
+    elif action == "deny":
+        rec.status = "DENIED"
+        db.commit()
+    
+    return {"message": f"Recommendation {action}d"}
+
+class ManualStockAdd(BaseModel):
+    symbol: str
+    quantity: int
+    price: float
+    date: datetime # User provided date
+    reasoning: str
+
+@app.post("/autonomous/holdings/add")
+def manual_add_stock(item: ManualStockAdd, db: Session = Depends(get_db)):
+    """Manually add a stock to AI portfolio."""
+    
+    # Update AI Cost Basis / Cash? 
+    # If user says "I bought this", should we deduct cash? 
+    # Usually manual add implies existing holding. Let's ask or assume.
+    # The user said: "it asks for the stock, how many shares i have, what price i bought them at and also at what date I bought them"
+    # It complicates 'AI Cash Balance'. If we deduct cash, it might go negative if it was a past buy.
+    # Let's assume we just track it and DONT touch cash, OR we deduct if it fits. 
+    # Safest is to NOT touch cash if it's a "migrate" action, but if it's "I just bought this", we might want to.
+    # Given requirements "I bought them at" (past tense), let's NOT deduct cash for now, or maybe create a "Correction" transaction.
+    # User didn't specify cash handling for manual adds. Let's just add to portfolio.
+    
+    new_item = AIPortfolioItem(
+        symbol=item.symbol,
+        quantity=item.quantity,
+        avg_cost=item.price,
+        total_cost=item.quantity * item.price,
+        current_price=item.price, # Will update on next refresh
+        purchased_at=item.date,
+        user_reasoning=item.reasoning
+    )
+    db.add(new_item)
+    db.commit()
+    return {"message": "Stock added manually"}
+
+class ManualStockSell(BaseModel):
+    symbol: str
+    quantity: int
+    price: float
+    reason: str
+
+@app.post("/autonomous/holdings/sell")
+def manual_sell_stock(item: ManualStockSell, db: Session = Depends(get_db)):
+    """Manually sell a stock from AI portfolio."""
+    # Find item
+    db_item = db.query(AIPortfolioItem).filter(AIPortfolioItem.symbol == item.symbol).first()
+    if not db_item:
+        raise HTTPException(status_code=404, detail="Item not found in AI portfolio")
+        
+    if db_item.quantity < item.quantity:
+        raise HTTPException(status_code=400, detail="Insufficient quantity")
+        
+    # Use Agent's logic to execute trade (handles Cash, History, Notification)
+    # We create a dummy settings/notification list just for this call context or fetch real ones
+    settings = db.query(UserSettings).first()
+    agent = AutonomousAgent(db)
+    notifications = []
+    
+    agent.execute_trade(
+        item.symbol,
+        "SELL",
+        item.quantity,
+        item.price,
+        f"Manual Sell: {item.reason}",
+        notifications,
+        settings
+    )
+    
+    return {"message": "Stock sold manually", "notifications": notifications}
+
+class NotesUpdate(BaseModel):
+    symbol: str
+    notes: str
+
+@app.post("/autonomous/holdings/update-notes")
+def update_stock_notes(update: NotesUpdate, db: Session = Depends(get_db)):
+    """Update user reasoning/notes for an AI holding."""
+    item = db.query(AIPortfolioItem).filter(AIPortfolioItem.symbol == update.symbol).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    
+    item.user_reasoning = update.notes
+    db.commit()
+    return {"message": "Notes updated"}
+
 @app.post("/autonomous/trade")
 def trigger_trading_cycle(db: Session = Depends(get_db)):
     """Manually triggers the AI trading cycle."""
@@ -513,7 +635,13 @@ def get_ai_portfolio_data(db: Session):
             "current_price": current_price,
             "market_value": market_value,
             "pnl": pnl,
-            "pnl_percent": pnl_percent
+            "pnl_percent": pnl_percent,
+            "purchased_at": item.purchased_at.isoformat() if item.purchased_at else None,
+            "user_reasoning": item.user_reasoning,
+            "last_decision": item.last_decision,
+            "last_reason": item.last_reason,
+            "last_confidence": item.last_confidence,
+            "last_analyzed": item.last_analyzed.isoformat() if item.last_analyzed else None
         })
         
         total_value += market_value

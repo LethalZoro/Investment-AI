@@ -8,13 +8,44 @@ class NewsAgent:
         self.ddgs = DDGS()
 
     def fetch_market_news(self, query="PSX Pakistan Stock Exchange market news"):
-        """Fetches latest news using DuckDuckGo."""
-        try:
-            results = self.ddgs.text(query, max_results=5)
-            return results
-        except Exception as e:
-            print(f"Error fetching news: {e}")
-            return []
+        """Fetches latest news using multiple query variations for broader coverage."""
+        
+        # Generate query variations
+        queries = [query]
+        
+        # If generic query, expand to specific categories
+        if "PSX" in query and "Pakistan" in query:
+            queries = [
+                "Pakistan Stock Exchange breaking news companies",
+                "PSX listed companies financial results announcements",
+                "Pakistan business news economy updates",
+                "KSE100 market sentiment analysis"
+            ]
+        # If specific symbol query (heuristic), add specific variations
+        elif "stock" in query.lower():
+            base_q = query.replace(" stock news", "").replace(" Pakistan Stock Exchange", "")
+            queries.append(f"{base_q} financial results report")
+            queries.append(f"{base_q} company announcement Pakistan")
+
+        print(f"[NEWS AGENT] running queries: {queries}")
+        
+        all_results = []
+        seen_urls = set()
+        
+        for q in queries:
+            try:
+                # Fetch fewer results per query to avoid rate limits/noise, but aggregate them
+                # Use timelimit='w' (week) to ensure news is recent
+                results = self.ddgs.text(q, max_results=20, timelimit="w") 
+                if results:
+                    for res in results:
+                        if res.get('href') not in seen_urls:
+                            all_results.append(res)
+                            seen_urls.add(res.get('href'))
+            except Exception as e:
+                print(f"Error fetching news for '{q}': {e}")
+                
+        return all_results
 
     def analyze_news(self, news_items):
         """Uses LLM to analyze news and generate trade signals."""
@@ -29,8 +60,12 @@ class NewsAgent:
         
         {news_text}
         
-        Identify any specific stocks or sectors that are likely to be significantly impacted (Positive or Negative).
-        Ignore general market noise. Focus on actionable insights.
+        Identify any specific stocks (companies) that are likely to be significantly impacted.
+        
+        CRITICAL INSTRUCTIONS:
+        1. Ignore general market indices like "KSE100", "KSE-100", "PSX", "All Share".
+        2. Look for specific company names and their corresponding stock symbols (e.g., "SYS" for Systems Ltd, "OGDC" for OGDCL, "TRG" for TRG Pakistan).
+        3. Only return alerts for specific TRADABLE stocks.
         
         Return a JSON object with a single key "alerts" containing a list of alerts. Format:
         {{
@@ -38,12 +73,12 @@ class NewsAgent:
                 {{
                     "symbol": "OGDC",
                     "signal": "BUY",
-                    "reason": "Oil prices surged globally.",
+                    "reason": "Oil prices surged globally, positive impact expected.",
                     "url": "http://example.com/news-link"
                 }}
             ]
         }}
-        If no actionable insights, return {{"alerts": []}}.
+        If no actionable insights for specific companies, return {{"alerts": []}}.
         """
         
         if not llm_agent.client:

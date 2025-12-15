@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from typing import List, Dict
 from openai import OpenAI
 
-from models import UserSettings, DailyPlan, PortfolioItem, AIAlert, AIPortfolioItem, AINotification, AITradeHistory
+from models import UserSettings, DailyPlan, PortfolioItem, AIAlert, AIPortfolioItem, AINotification, AITradeHistory, AIRecommendation
 from market_data import market_data
 from news_agent import news_agent
 from portfolio_engine import PortfolioEngine
@@ -101,11 +101,30 @@ class AutonomousAgent:
         for stock in market_stats.get("top_losers", []):
             candidates.add(stock["symbol"])
             
-        # 2. News Search: "Best stocks to buy"
-        # This is a mock implementation. In a real scenario, we'd parse the news results.
-        # For now, we'll rely on the market data + specific news analysis in the loop above.
-        # We could add a few hardcoded "blue chip" stocks to always check
-        candidates.update(["OGDC", "PPL", "TRG", "LUCK", "ENGRO"])
+        # 2. News Search: specific queries to find trending/breakout stocks
+        queries = [
+            "Pakistan Stock Exchange top trending stocks news",
+            "PSX companies earnings announcements",
+            "Pakistan stock market positive news companies",
+            "undervalued stocks Pakistan Stock Exchange analysis",
+            "potential breakout stocks PSX hidden gems"
+        ]
+        
+        print(f"[MARKET SCAN] Searching news for potential candidates...")
+        for q in queries:
+            try:
+                news = news_agent.fetch_market_news(q)
+                if news:
+                    analysis = news_agent.analyze_news(news)
+                    for alert in analysis:
+                        if alert.get('symbol'):
+                            candidates.add(alert['symbol'])
+                            print(f"[MARKET SCAN] Found candidate via news: {alert['symbol']}")
+            except Exception as e:
+                print(f"[MARKET SCAN] Error searching news '{q}': {e}")
+
+        # Add a few hardcoded "blue chip" stocks to always check
+        candidates.update(["OGDC", "PPL", "TRG", "LUCK", "ENGRO", "SYS"])
         
         return list(candidates)
 
@@ -142,6 +161,12 @@ class AutonomousAgent:
         else:
             holding_period_str = "Unknown"
             holding_days = 999  # Assume old position
+            
+        # Get User Reasoning Context
+        user_reasoning = ""
+        portfolio_item = self.db.query(AIPortfolioItem).filter(AIPortfolioItem.symbol == symbol).first()
+        if portfolio_item and portfolio_item.user_reasoning:
+            user_reasoning = f"\nUSER NOTES: {portfolio_item.user_reasoning}\n(Consider these notes heavily)"
         
         # Fetch recent news for context
         try:
@@ -168,6 +193,21 @@ class AutonomousAgent:
 POSITION DETAILS:
 - Symbol: {symbol}
 - Quantity Held: {quantity} shares
+- Average Cost: Rs. {avg_cost:.2f}
+- Current Price: Rs. {current_price:.2f}
+- PnL: {pnl_percent:.2f}% (Rs. {pnl_amount:.2f})
+- Purchased Date: {purchased_at.strftime('%Y-%m-%d') if purchased_at else 'Unknown'}
+- Time Held: {holding_period_str}
+
+NEWS CONTEXT:
+"{news_summary}"
+(Use this news to determine if the stock has positive catalysts or negative headwinds)
+
+USER NOTES:
+{user_reasoning}
+
+STRATEGY GUIDELINES:
+1. **Context Matters**: {user_reasoning if user_reasoning else "No specific user notes provided."}
 2. **Time Horizon**: Positions held <3 days should be given more time unless fundamentally broken.
 3. **Risk Management**: Cut significant losses (>8-10%) to preserve capital.
 4. **Profit Taking**: Capture gains at +15-20% or on strong news catalysts.
@@ -222,7 +262,9 @@ Make a measured, patient decision. Short-term noise should not trigger premature
             
             # Ensure quantity is valid
             if decision.get("action") == "SELL":
-                decision["quantity"] = min(decision.get("quantity", quantity), quantity)
+                decision["quantity"] = int(min(decision.get("quantity", quantity), quantity))
+            else:
+                decision["quantity"] = int(decision.get("quantity", 0))
             
             return decision
             
@@ -261,15 +303,20 @@ Make a measured, patient decision. Short-term noise should not trigger premature
                 purchased_at=item.purchased_at  # Pass holding period info
             )
             
+            # Execute the decision
             action = decision.get("action", "HOLD")
             qty = decision.get("quantity", 0)
             reason = decision.get("reason", "No reason provided")
             confidence = decision.get("confidence", "UNKNOWN")
-            
-            # Execute the decision
+
+            # Persist Decision to DB (for UI visibility)
+            item.last_decision = action
+            item.last_reason = reason
+            item.last_confidence = confidence
+            item.last_analyzed = datetime.utcnow()
             if action == "SELL" and qty > 0:
-                print(f"[PORTFOLIO MONITOR] Executing SELL: {qty} {item.symbol} | Confidence: {confidence}")
-                self.execute_trade(item.symbol, "SELL", qty, current_price, f"GPT Decision ({confidence}): {reason}", notifications, settings)
+                print(f"[PORTFOLIO MONITOR] Recommendation SELL: {qty} {item.symbol} | Confidence: {confidence}")
+                self.create_recommendation(item.symbol, "SELL", qty, current_price, f"GPT Decision ({confidence}): {reason}", notifications)
             elif action == "BUY_MORE" and qty > 0:
                 print(f"[PORTFOLIO MONITOR] GPT suggests BUY_MORE, but skipping (position management mode)")
                 # Optionally implement buy_more logic here
@@ -295,10 +342,40 @@ Make a measured, patient decision. Short-term noise should not trigger premature
         
         # Execute if we have enough cash
         if cost <= settings.ai_cash_balance:
-            self.execute_trade(symbol, action, qty, price, strategy, notifications, settings)
+            # Create Recommendation instead of direct trade
+            self.create_recommendation(symbol, action, qty, price, strategy, notifications)
 
-    def execute_trade(self, symbol, action, quantity, price, reason, notifications, settings):
-        """Executes a trade for the AI portfolio."""
+    def create_recommendation(self, symbol, action, quantity, price, reason, notifications):
+        """Creates a trade recommendation for user approval."""
+        print(f"[RECOMMENDATION] {action} {quantity} {symbol} @ {price}")
+        
+        # Check if pending recommendation exists to avoid duplicates
+        existing = self.db.query(AIRecommendation).filter(
+            AIRecommendation.symbol == symbol, 
+            AIRecommendation.action == action,
+            AIRecommendation.status == "PENDING"
+        ).first()
+        
+        if existing:
+            return
+
+        rec = AIRecommendation(
+            symbol=symbol,
+            action=action,
+            quantity=quantity,
+            price=price,
+            reason=reason,
+            status="PENDING"
+        )
+        self.db.add(rec)
+        
+        # Notify
+        msg = f"Proposed {action} of {quantity} {symbol}. Waiting for approval."
+        self._add_notification("Action Required", msg, "ACTION_REQUIRED", notifications)
+        self.db.commit()
+
+    def execute_trade(self, symbol, action, quantity, price, reason, notifications, settings, recommendation_id=None):
+        """Executes a trade for the AI portfolio (APPROVED ONLY)."""
         
         total_value = quantity * price
         
@@ -366,6 +443,12 @@ Make a measured, patient decision. Short-term noise should not trigger premature
             msg = f"Sold {quantity} {symbol} at {price:.2f}. PnL: {pnl:.2f}. Reason: {reason}"
             self._add_notification("AI Trade Executed", msg, "TRADE", notifications)
             
+        # Update Recommendation Status if linked
+        if recommendation_id:
+            rec = self.db.query(AIRecommendation).filter(AIRecommendation.id == recommendation_id).first()
+            if rec:
+                rec.status = "EXECUTED"
+        
         self.db.commit()
 
     def _add_notification(self, title, message, type, notifications):

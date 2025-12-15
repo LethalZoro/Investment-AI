@@ -9,3 +9,5 @@ requests
 ddgs
 apscheduler
 pytz
+psycopg2-binary
+psycopg2

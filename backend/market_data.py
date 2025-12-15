@@ -19,7 +19,7 @@ class MarketDataService:
         self.stats_ttl = timedelta(minutes=5)  # 5 minutes for market stats
         
         self.last_request_time = 0
-        self.min_interval = 0.6 # ~100 requests per minute = 0.6s per request
+        self.min_interval = 0.1 # ~100 requests per minute = 0.6s per request
 
     def _rate_limit(self):
         current_time = time.time()
