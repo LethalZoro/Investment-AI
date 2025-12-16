@@ -649,7 +649,8 @@ const AIStockDashboard = () => {
                             <div>
                                 <p className="text-text-secondary text-sm mb-1">Initial Capital</p>
                                 <p className="text-2xl font-bold text-white">
-                                    Rs. {(portfolio.summary.initial_capital || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                    Rs.
+                                    {/* Rs. {(portfolio.summary.initial_capital || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })} */}
                                 </p>
                             </div>
                             <div>
