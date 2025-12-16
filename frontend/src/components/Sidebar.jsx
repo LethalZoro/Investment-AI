@@ -7,12 +7,12 @@ const Sidebar = () => {
     const location = useLocation();
 
     const navItems = [
-        { path: '/', icon: LayoutDashboard, label: 'Dashboard' },
-        { path: '/portfolio', icon: PieChart, label: 'Portfolio' },
-        { path: '/market', icon: LineChart, label: 'Market' },
-        { path: '/news', icon: Bell, label: 'News' },
+        // { path: '/', icon: LayoutDashboard, label: 'Dashboard' },
+        // { path: '/portfolio', icon: PieChart, label: 'Portfolio' },
         { path: '/ai-stocks', icon: TrendingUp, label: 'AI Stocks' },
         { path: '/chat', icon: MessageSquare, label: 'AI Chat' },
+        { path: '/market', icon: LineChart, label: 'Market' },
+        { path: '/news', icon: Bell, label: 'News' },
         { path: '/settings', icon: Settings, label: 'Settings' },
     ];
 
