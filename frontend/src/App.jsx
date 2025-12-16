@@ -55,8 +55,8 @@ function App() {
     <Router>
       <Layout>
         <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/portfolio" element={<PortfolioView />} />
+          <Route path="/" element={<AIStockDashboard />} />
+          {/* <Route path="/portfolio" element={<PortfolioView />} /> */}
           <Route path="/chat" element={<ChatInterface />} />
           <Route path="/market" element={<MarketView />} />
           <Route path="/news" element={<NewsView />} />

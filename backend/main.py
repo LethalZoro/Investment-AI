@@ -608,7 +608,7 @@ def trigger_trading_cycle(db: Session = Depends(get_db)):
     notifications = agent.run_trading_cycle()
     return {"message": "Trading cycle completed", "notifications": notifications}
 
-def get_ai_portfolio_data(db: Session):
+def get_ai_portfolio_data(db: Session, refresh_prices: bool = True):
     """Helper to calculate AI portfolio metrics."""
     items = db.query(AIPortfolioItem).all()
     settings = db.query(UserSettings).first()
@@ -622,30 +622,92 @@ def get_ai_portfolio_data(db: Session):
     total_value = 0
     total_pnl = 0
     
-    for item in items:
-        current_price = market_data.get_live_price(item.symbol)
-        market_value = current_price * item.quantity
-        pnl = market_value - item.total_cost
-        pnl_percent = (pnl / item.total_cost) * 100 if item.total_cost > 0 else 0
+    if refresh_prices:
+        # Use ThreadPool to fetch prices in parallel for speed
+        from concurrent.futures import ThreadPoolExecutor
         
-        portfolio_data.append({
-            "symbol": item.symbol,
-            "quantity": item.quantity,
-            "avg_cost": item.avg_cost,
-            "current_price": current_price,
-            "market_value": market_value,
-            "pnl": pnl,
-            "pnl_percent": pnl_percent,
-            "purchased_at": item.purchased_at.isoformat() if item.purchased_at else None,
-            "user_reasoning": item.user_reasoning,
-            "last_decision": item.last_decision,
-            "last_reason": item.last_reason,
-            "last_confidence": item.last_confidence,
-            "last_analyzed": item.last_analyzed.isoformat() if item.last_analyzed else None
-        })
+        def process_item(item):
+            current_price = market_data.get_live_price(item.symbol)
+            # Update cache in DB
+            try:
+                # We need a new session or careful management here if updating
+                # For simplicity, we just return the value and update locally, 
+                # but to persist 'current_price' for the next 'cached' load, we should update it.
+                # However, modifying 'item' here works because it's attached to the session 'db' passed in,
+                # BUT 'market_data.get_live_price' is IO bound.
+                # Modifying SQLAlchemy objects in threads can be tricky.
+                pass
+            except:
+                pass
+                
+            return {
+                "item": item, 
+                "current_price": current_price
+            }
+
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            # We map to a helper that fetches price, then we update properly in main thread
+            results = list(executor.map(process_item, items))
+            
+        for res in results:
+            item = res["item"]
+            price = res["current_price"]
+            
+            # Update DB cache
+            if price > 0:
+                item.current_price = price
+                
+            market_value = price * item.quantity
+            pnl = market_value - item.total_cost
+            pnl_percent = (pnl / item.total_cost) * 100 if item.total_cost > 0 else 0
+            
+            portfolio_data.append({
+                "symbol": item.symbol,
+                "quantity": item.quantity,
+                "avg_cost": item.avg_cost,
+                "current_price": price,
+                "market_value": market_value,
+                "pnl": pnl,
+                "pnl_percent": pnl_percent,
+                "purchased_at": item.purchased_at.isoformat() if item.purchased_at else None,
+                "user_reasoning": item.user_reasoning,
+                "last_decision": item.last_decision,
+                "last_reason": item.last_reason,
+                "last_confidence": item.last_confidence,
+                "last_analyzed": item.last_analyzed.isoformat() if item.last_analyzed else None
+            })
+            
+            total_value += market_value
+            total_pnl += pnl
         
-        total_value += market_value
-        total_pnl += pnl
+        # Commit the updated prices to DB
+        db.commit()
+
+    else:
+        # Fast route: Use database values
+        for item in items:
+            market_value = item.current_price * item.quantity
+            pnl = market_value - item.total_cost
+            pnl_percent = (pnl / item.total_cost) * 100 if item.total_cost > 0 else 0
+            
+            portfolio_data.append({
+                "symbol": item.symbol,
+                "quantity": item.quantity,
+                "avg_cost": item.avg_cost,
+                "current_price": item.current_price,
+                "market_value": market_value,
+                "pnl": pnl,
+                "pnl_percent": pnl_percent,
+                "purchased_at": item.purchased_at.isoformat() if item.purchased_at else None,
+                "user_reasoning": item.user_reasoning,
+                "last_decision": item.last_decision,
+                "last_reason": item.last_reason,
+                "last_confidence": item.last_confidence,
+                "last_analyzed": item.last_analyzed.isoformat() if item.last_analyzed else None
+            })
+            
+            total_value += market_value
+            total_pnl += pnl
     
     # Calculate overall PnL metrics
     current_net_worth = total_value + settings.ai_cash_balance
@@ -685,9 +747,9 @@ def get_ai_portfolio_data(db: Session):
     }
 
 @app.get("/autonomous/portfolio")
-def get_ai_portfolio(db: Session = Depends(get_db)):
+def get_ai_portfolio(refresh_prices: bool = True, db: Session = Depends(get_db)):
     """Returns the AI's current portfolio holdings with overall PnL metrics."""
-    return get_ai_portfolio_data(db)
+    return get_ai_portfolio_data(db, refresh_prices)
 
 def run_daily_budget_injection():
     """Standalone function to inject daily budget."""

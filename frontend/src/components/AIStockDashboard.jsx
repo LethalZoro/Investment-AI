@@ -371,19 +371,46 @@ const AIStockDashboard = () => {
     const [activityFilter, setActivityFilter] = useState('all'); // 'today', 'week', 'month', 'custom', 'all'
     const [customDays, setCustomDays] = useState(3);
 
-    const fetchData = async () => {
-        setLoading(true);
+    const fetchData = async (forceRefreshPrice = false) => {
+        // Only show loading spinner on very first load if data is empty, or manage it via initial state.
+        // We removed setLoading(true) here to prevent flash on every interval.
         try {
-            const [portRes, notifRes, tradeRes, recRes] = await Promise.all([
-                axios.get(`${API_BASE_URL}/autonomous/portfolio`),
+            // If it's the initial load or a specific refresh, we can try a 2-step load:
+            // 1. Get cached data (Fast)
+            // 2. Get live data (Slower) if needed
+
+            // For periodic updates (interval), we usually want live prices (refresh_prices=true),
+            // but for first load, we want speed.
+
+            // Strategy:
+            // ALWAYS fetch standard (cached) first if we aren't specifically forcing a price refresh.
+            // THEN, if it was a fast fetch, trigger a background refresh.
+
+            const portfolioRes = await axios.get(`${API_BASE_URL}/autonomous/portfolio?refresh_prices=${forceRefreshPrice}`);
+            setPortfolio(portfolioRes.data);
+
+            // Parallel fetch for logs
+            const [notifRes, tradeRes, recRes] = await Promise.all([
                 axios.get(`${API_BASE_URL}/autonomous/notifications`),
                 axios.get(`${API_BASE_URL}/autonomous/trade-history`),
                 axios.get(`${API_BASE_URL}/autonomous/recommendations`)
             ]);
-            setPortfolio(portRes.data);
+
             setNotifications(notifRes.data);
             setTradeHistory(tradeRes.data);
             setRecommendations(recRes.data);
+
+            // If we did a fast load (forceRefreshPrice=false), trigger a background refresh
+            if (!forceRefreshPrice) {
+                // Quietly update prices in background
+                axios.get(`${API_BASE_URL}/autonomous/portfolio?refresh_prices=true`)
+                    .then(res => {
+                        console.log("Background price update complete");
+                        setPortfolio(res.data);
+                    })
+                    .catch(err => console.error("Background refresh failed", err));
+            }
+
         } catch (error) {
             console.error("Error fetching AI data", error);
         } finally {
@@ -686,7 +713,7 @@ const AIStockDashboard = () => {
                                                         {item.last_decision ? (
                                                             <div className="flex flex-col">
                                                                 <span className={`font-bold ${item.last_decision === 'SELL' ? 'text-danger' :
-                                                                        item.last_decision === 'BUY_MORE' ? 'text-secondary' : 'text-text-secondary'
+                                                                    item.last_decision === 'BUY_MORE' ? 'text-secondary' : 'text-text-secondary'
                                                                     }`}>
                                                                     {item.last_decision}
                                                                 </span>
