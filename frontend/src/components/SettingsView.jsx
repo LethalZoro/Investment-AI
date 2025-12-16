@@ -114,7 +114,7 @@ const SettingsView = () => {
                             <input
                                 type="number"
                                 name="ai_cash_balance"
-                                value={settings.ai_cash_balance || 10000}
+                                value={settings.ai_cash_balance}
                                 onChange={handleChange}
                                 className="input w-full"
                                 min="0"
