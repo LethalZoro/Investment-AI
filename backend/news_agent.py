@@ -47,6 +47,16 @@ class NewsAgent:
                 
         return all_results
 
+    def search_web(self, query: str, limit: int = 5):
+        """Perform a direct web search for specific user queries."""
+        try:
+            print(f"[NEWS AGENT] Searching web for: {query}")
+            results = self.ddgs.text(query, max_results=limit, timelimit="w")
+            return results if results else []
+        except Exception as e:
+            print(f"Error searching web: {e}")
+            return []
+
     def analyze_news(self, news_items):
         """Uses LLM to analyze news and generate trade signals."""
         if not news_items:

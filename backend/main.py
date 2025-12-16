@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict
 from dotenv import load_dotenv
 import os
 from datetime import datetime, timedelta
@@ -375,6 +375,7 @@ def search_market(q: str):
 class ChatRequest(BaseModel):
     message: str
     data_source: str = "ai" # "ai" or "personal"
+    history: List[Dict[str, str]] = [] # [{"role": "user", "content": "..."}]
 
 @app.post("/chat")
 def chat_endpoint(request: ChatRequest, db: Session = Depends(get_db)):
@@ -419,7 +420,21 @@ def chat_endpoint(request: ChatRequest, db: Session = Depends(get_db)):
         "ai_trade_history": ai_history
     }
     
-    response = llm_agent.get_response(request.message, context)
+    # Check for search intent in message
+    search_keywords = ["news", "search", "latest", "forecast", "outlook", "why", "happened", "market", "trend"]
+    # Check if message contains a stock symbol or keyword
+    should_search = any(kw in request.message.lower() for kw in search_keywords)
+    
+    if should_search:
+        try:
+            from news_agent import news_agent
+            # Use original message as query
+            search_results = news_agent.search_web(request.message + " Pakistan Stock Exchange", limit=3)
+            context["news_context"] = search_results
+        except Exception as e:
+            print(f"Search context error: {e}")
+    
+    response = llm_agent.get_response(request.message, context, request.history)
     return response
 
 # --- Autonomous Agent Routes ---

@@ -32,9 +32,15 @@ const ChatInterface = () => {
         setLoading(true);
 
         try {
+            // Prepare history (map 'bot' to 'assistant' for OpenAI)
+            const history = messages.map(msg => ({
+                role: msg.role === 'bot' ? 'assistant' : 'user',
+                content: msg.content
+            }));
+
             const response = await axios.post(`${API_BASE_URL}/chat`, {
                 message: input,
-                context_type: dataSource
+                history: history
             });
 
             const botMsg = { role: 'bot', content: response.data.answer };
@@ -64,29 +70,8 @@ const ChatInterface = () => {
                 </div>
 
                 {/* Data Source Toggle */}
-                <div className="flex bg-slate-800 rounded-lg p-1 border border-slate-700">
-                    <button
-                        onClick={() => setDataSource('ai')}
-                        className={clsx(
-                            'px-3 py-1.5 text-xs font-medium rounded-md transition-all',
-                            dataSource === 'ai'
-                                ? 'bg-primary text-white shadow-sm'
-                                : 'text-text-secondary hover:text-white'
-                        )}
-                    >
-                        AI Stocks
-                    </button>
-                    <button
-                        onClick={() => setDataSource('personal')}
-                        className={clsx(
-                            'px-3 py-1.5 text-xs font-medium rounded-md transition-all',
-                            dataSource === 'personal'
-                                ? 'bg-primary text-white shadow-sm'
-                                : 'text-text-secondary hover:text-white'
-                        )}
-                    >
-                        My Portfolio
-                    </button>
+                <div className="flex bg-slate-800 rounded-lg p-1 border border-slate-700 hidden">
+                    {/* Toggle Removed - Always AI */}
                 </div>
             </div>
 
