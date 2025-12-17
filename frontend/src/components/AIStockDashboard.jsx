@@ -577,7 +577,8 @@ const AIStockDashboard = () => {
             {activeTab === 'dashboard' && (
                 <>
                     {/* Summary Cards */}
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        {/* 1. Net Worth */}
                         <div className="card bg-gradient-to-br from-surface to-surface/50">
                             <div className="flex items-center gap-4">
                                 <div className="p-3 bg-primary/10 rounded-lg text-primary">
@@ -592,6 +593,7 @@ const AIStockDashboard = () => {
                             </div>
                         </div>
 
+                        {/* 2. Available Budget */}
                         <div className="card bg-gradient-to-br from-surface to-surface/50 relative group">
                             <button
                                 onClick={() => setShowBudgetModal(true)}
@@ -613,6 +615,37 @@ const AIStockDashboard = () => {
                             </div>
                         </div>
 
+                        {/* 3. Initial Capital (New) */}
+                        <div className="card bg-gradient-to-br from-surface to-surface/50">
+                            <div className="flex items-center gap-4">
+                                <div className="p-3 bg-blue-500/10 rounded-lg text-blue-500">
+                                    <History className="w-6 h-6" />
+                                </div>
+                                <div>
+                                    <p className="text-text-secondary text-sm">Initial Capital</p>
+                                    <p className="text-2xl font-bold text-white">
+                                        Rs. {portfolio.summary.initial_capital?.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* 4. Active Positions */}
+                        <div className="card bg-gradient-to-br from-surface to-surface/50">
+                            <div className="flex items-center gap-4">
+                                <div className="p-3 bg-accent/10 rounded-lg text-accent">
+                                    <Activity className="w-6 h-6" />
+                                </div>
+                                <div>
+                                    <p className="text-text-secondary text-sm">Active Positions</p>
+                                    <p className="text-2xl font-bold text-white">
+                                        {portfolio.holdings.length}
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* 5. Unrealized PnL */}
                         <div className="card bg-gradient-to-br from-surface to-surface/50">
                             <div className="flex items-center gap-4">
                                 <div className={`p-3 rounded-lg ${portfolio.summary.total_pnl >= 0 ? 'bg-secondary/10 text-secondary' : 'bg-danger/10 text-danger'}`}>
@@ -627,49 +660,19 @@ const AIStockDashboard = () => {
                             </div>
                         </div>
 
+                        {/* 6. Return % (New) */}
                         <div className="card bg-gradient-to-br from-surface to-surface/50">
                             <div className="flex items-center gap-4">
-                                <div className="p-3 bg-accent/10 rounded-lg text-accent">
-                                    <Activity className="w-6 h-6" />
+                                <div className={`p-3 rounded-lg ${portfolio.summary.overall_pnl_percent >= 0 ? 'bg-secondary/10 text-secondary' : 'bg-danger/10 text-danger'}`}>
+                                    {portfolio.summary.overall_pnl_percent >= 0 ? <TrendingUp className="w-6 h-6" /> : <TrendingDown className="w-6 h-6" />}
                                 </div>
                                 <div>
-                                    <p className="text-text-secondary text-sm">Active Positions</p>
-                                    <p className="text-2xl font-bold text-white">
-                                        {portfolio.holdings.length}
+                                    <p className="text-text-secondary text-sm">Return %</p>
+                                    <p className={`text-2xl font-bold ${portfolio.summary.overall_pnl_percent >= 0 ? 'text-secondary' : 'text-danger'}`}>
+                                        {portfolio.summary.overall_pnl_percent >= 0 ? '+' : ''}
+                                        {portfolio.summary.overall_pnl_percent?.toFixed(2)}%
                                     </p>
                                 </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Overall Performance Card */}
-                    <div className="card bg-gradient-to-br from-primary/5 to-secondary/5 border border-primary/20">
-                        <h2 className="text-xl font-bold text-white mb-4">Overall Performance</h2>
-                        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                            <div>
-                                <p className="text-text-secondary text-sm mb-1">Initial Capital</p>
-                                <p className="text-2xl font-bold text-white">
-                                    Rs.
-                                    {/* Rs. {(portfolio.summary.initial_capital || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })} */}
-                                </p>
-                            </div>
-                            <div>
-                                <p className="text-text-secondary text-sm mb-1">Current Net Worth</p>
-                                <p className="text-2xl font-bold text-white">
-                                    Rs. {portfolio.summary.total_value.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                                </p>
-                            </div>
-                            <div>
-                                <p className="text-text-secondary text-sm mb-1">Realized PnL</p>
-                                <p className={`text-2xl font-bold ${(portfolio.summary.realized_pnl || 0) >= 0 ? 'text-secondary' : 'text-danger'}`}>
-                                    {(portfolio.summary.realized_pnl || 0) >= 0 ? '+' : ''}Rs. {(portfolio.summary.realized_pnl || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                                </p>
-                            </div>
-                            <div>
-                                <p className="text-text-secondary text-sm mb-1">Return %</p>
-                                <p className={`text-2xl font-bold ${(portfolio.summary.overall_pnl_percent || 0) >= 0 ? 'text-secondary' : 'text-danger'}`}>
-                                    {(portfolio.summary.overall_pnl_percent || 0) >= 0 ? '+' : ''}{(portfolio.summary.overall_pnl_percent || 0).toFixed(2)}%
-                                </p>
                             </div>
                         </div>
                     </div>

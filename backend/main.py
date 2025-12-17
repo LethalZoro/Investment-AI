@@ -778,9 +778,15 @@ def get_ai_portfolio_data(db: Session, refresh_prices: bool = True):
             total_value += market_value
             total_pnl += pnl
     
+    
     # Calculate overall PnL metrics
     current_net_worth = total_value + settings.ai_cash_balance
-    initial_capital = settings.initial_ai_capital
+    
+    # User Request: "Initial capital make it net worth minus the unrealized pnl"
+    # This represents the total Cost Basis (Stocks Cost + Cash) currently in the system.
+    # It effectively ignores realized gains/losses from the past for the "Initial Capital" metric,
+    # treating the current state as the baseline.
+    initial_capital = current_net_worth - total_pnl
     
     # Calculate Total Realized P&L from History
     from models import AITradeHistory
