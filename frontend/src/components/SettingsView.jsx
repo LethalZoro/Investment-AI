@@ -105,7 +105,7 @@ const SettingsView = () => {
                                 value={settings.daily_trade_budget}
                                 onChange={handleChange}
                                 className="input w-full"
-                                min="1000"
+                                min="0"
                             />
                             <p className="text-xs text-text-muted mt-1">Max amount to allocate per day.</p>
                         </div>
