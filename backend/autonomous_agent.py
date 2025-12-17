@@ -4,40 +4,30 @@ import pytz
 from datetime import datetime
 from sqlalchemy.orm import Session
 from typing import List, Dict
-from openai import OpenAI
+import math
 
-from models import UserSettings, DailyPlan, PortfolioItem, AIAlert, AIPortfolioItem, AINotification, AITradeHistory, AIRecommendation
+# Updated Imports
+from models import UserSettings, StockUniverse, AIPortfolioItem, AINotification, AITradeHistory, AIRecommendation, StockUniverse
 from market_data import market_data
-from news_agent import news_agent
+# from news_agent import news_agent # Disabled for now to focus on allocation logic
 from portfolio_engine import PortfolioEngine
-from budget_engine import BudgetEngine
-from risk_engine import RiskEngine
-from strategy_engine import StrategyEngine
 
 class AutonomousAgent:
     def __init__(self, db: Session):
         self.db = db
-        self.budget_engine = BudgetEngine(db)
-        self.portfolio_engine = PortfolioEngine(db) # Still useful for user portfolio, but we need AI specific logic
-        self.strategy_engine = StrategyEngine()
-        
-        # Initialize OpenAI client for GPT-driven decisions
-        api_key = os.getenv("OPENAI_API_KEY")
-        if api_key:
-            self.openai_client = OpenAI(api_key=api_key)
-        else:
-            self.openai_client = None
-            print("Warning: OPENAI_API_KEY not found. GPT decision-making will be disabled.")
-
+        # We don't need news_agent for the core allocation engine right now, 
+        # but can re-enable for "Regime Detection" later.
 
     def run_trading_cycle(self):
         """
-        Executes the full AI trading cycle:
-        1. Analyze News & Market (Signal Generation)
-        2. Monitor Existing Portfolio (Stop Loss/Take Profit)
-        3. Execute New Trades (Buy/Sell based on signals)
+        Executes the 'Forever Fund' Daily Allocation Cycle.
+        1. Inject Daily Budget (if new day).
+        2. Score the Universe (Opportunity Score).
+        3. Allocate Capital to Top Ideas.
+        4. Execute Buys.
         """
         notifications = []
+        print("[FOREVER FUND] Starting Daily Cycle...")
 
         # 1. Get Settings & Check Trading Hours
         settings = self.db.query(UserSettings).first()
@@ -55,299 +45,40 @@ class AutonomousAgent:
         end_time = settings.trading_end_time or "15:30"
         
         if not (start_time <= current_time_str <= end_time):
-            print(f"[TRADING CYCLE] Skipping: Current time {current_time_str} (PKT) is outside trading hours ({start_time} - {end_time})")
+             print(f"[CYCLE] Skipping: Time {current_time_str} outside {start_time}-{end_time}")
+             return []
+
+        # 2. Daily Budget Injection
+        # We check if we have already "run" today by looking at the last 'DEPOSIT' with 'Daily Budget' reason
+        # Or simpler: rely on the external scheduler calling 'run_daily_budget_injection' in main.py
+        # But to be safe, let's verify cash balance is sufficient to trade.
+        
+        if settings.ai_cash_balance < 1000:
+            print("[CYCLE] Low Cash (<1000). Waiting for deposit.")
             return []
 
-        # 2. Monitor Existing Portfolio
-        self.monitor_portfolio(notifications)
+        # 3. Allocation Engine
+        allocation_plan = self._allocate_capital(settings.ai_cash_balance, settings)
         
-        current_budget = settings.ai_cash_balance
+        print(f"[DEBUG] Allocation Plan returned {len(allocation_plan)} items.")
         
-        # 3. Broad Market Scan (News + Market Data)
-        # Search for potential candidates
-        candidates = self._scan_market_candidates()
-        
-        # 4. Analyze Candidates
-        for symbol in candidates:
-            # Check if we already hold it
-            existing = self.db.query(AIPortfolioItem).filter(AIPortfolioItem.symbol == symbol).first()
-            if existing: continue
+        # 4. Execute Plan -> CREATE RECOMMENDATIONS (Approvals Required)
+        for trade in allocation_plan:
+            print(f"[DEBUG] Processing allocation for {trade['symbol']}")
+            self.create_recommendation(
+                trade["symbol"],
+                "BUY",
+                trade["quantity"],
+                trade["price"],
+                f"Forever Fund Allocation: Score {trade['score']} (Tier: {trade['tier']}). {trade.get('news_reason', '')}",
+                notifications
+            )
             
-            # Analyze News for this specific stock
-            news = news_agent.fetch_market_news(f"{symbol} stock news Pakistan Stock Exchange")
-            analysis = news_agent.analyze_news(news)
-            
-            # If analysis returns a BUY signal
-            for alert in analysis:
-                if alert.get('signal') == 'BUY' and alert.get('symbol') == symbol:
-                     self._evaluate_and_trade(
-                         {"symbol": symbol, "price": market_data.get_live_price(symbol)}, 
-                         "BUY", 
-                         f"News Sentiment: {alert.get('reason')}", 
-                         settings, 
-                         notifications
-                     )
-
         return notifications
-
-    def _scan_market_candidates(self):
-        """Scans for potential stocks using market data and news search."""
-        candidates = set()
-        
-        # 1. Market Data: Top Gainers/Losers
-        market_stats = market_data.get_market_summary()
-        for stock in market_stats.get("top_gainers", []):
-            candidates.add(stock["symbol"])
-        for stock in market_stats.get("top_losers", []):
-            candidates.add(stock["symbol"])
-            
-        # 2. News Search: specific queries to find trending/breakout stocks
-        queries = [
-            "Pakistan Stock Exchange top trending stocks news",
-            "PSX companies earnings announcements",
-            "Pakistan stock market positive news companies",
-            "undervalued stocks Pakistan Stock Exchange analysis",
-            "potential breakout stocks PSX hidden gems"
-        ]
-        
-        print(f"[MARKET SCAN] Searching news for potential candidates...")
-        for q in queries:
-            try:
-                news = news_agent.fetch_market_news(q)
-                if news:
-                    analysis = news_agent.analyze_news(news)
-                    for alert in analysis:
-                        if alert.get('symbol'):
-                            candidates.add(alert['symbol'])
-                            print(f"[MARKET SCAN] Found candidate via news: {alert['symbol']}")
-            except Exception as e:
-                print(f"[MARKET SCAN] Error searching news '{q}': {e}")
-
-        # Add a few hardcoded "blue chip" stocks to always check
-        candidates.update(["OGDC", "PPL", "TRG", "LUCK", "ENGRO", "SYS"])
-        
-        return list(candidates)
-
-    def _analyze_position_with_gpt(self, symbol: str, quantity: int, avg_cost: float, current_price: float, purchased_at: datetime = None) -> Dict:
-        """
-        Uses GPT to intelligently decide whether to HOLD, SELL (partial/full), or BUY_MORE for a position.
-        Returns: {"action": "HOLD/SELL/BUY_MORE", "quantity": int, "confidence": str, "reason": str}
-        """
-        
-        # Fallback decision if GPT is not available
-        if not self.openai_client:
-            pnl_percent = (current_price - avg_cost) / avg_cost
-            if pnl_percent < -0.05:
-                return {"action": "SELL", "quantity": quantity, "confidence": "LOW", "reason": "Fallback: Stop Loss"}
-            elif pnl_percent > 0.10:
-                return {"action": "SELL", "quantity": max(1, int(quantity * 0.5)), "confidence": "LOW", "reason": "Fallback: Take Profit"}
-            else:
-                return {"action": "HOLD", "quantity": 0, "confidence": "LOW", "reason": "Fallback: Within range"}
-        
-        # Calculate position metrics
-        pnl_percent = ((current_price - avg_cost) / avg_cost) * 100
-        pnl_amount = (current_price - avg_cost) * quantity
-        position_value = current_price * quantity
-        
-        # Calculate holding period
-        if purchased_at:
-            holding_duration = datetime.now() - purchased_at
-            holding_days = holding_duration.days
-            holding_hours = holding_duration.total_seconds() / 3600
-            if holding_days > 0:
-                holding_period_str = f"{holding_days} day{'s' if holding_days != 1 else ''}"
-            else:
-                holding_period_str = f"{holding_hours:.1f} hours"
-        else:
-            holding_period_str = "Unknown"
-            holding_days = 999  # Assume old position
-            
-        # Get User Reasoning Context
-        user_reasoning = ""
-        portfolio_item = self.db.query(AIPortfolioItem).filter(AIPortfolioItem.symbol == symbol).first()
-        if portfolio_item and portfolio_item.user_reasoning:
-            user_reasoning = f"\nUSER NOTES: {portfolio_item.user_reasoning}\n(Consider these notes heavily)"
-        
-        # Fetch recent news for context
-        try:
-            news = news_agent.fetch_market_news(f"{symbol} stock Pakistan Stock Exchange latest")
-            news_summary = " | ".join([f"{item.get('title', 'N/A')}" for item in news[:3]]) if news else "No recent news available"
-        except Exception as e:
-            news_summary = f"Error fetching news: {str(e)}"
-        
-        # Get market context
-        try:
-            market_stats = market_data.get_market_summary()
-            market_sentiment = "BULLISH" if market_stats.get("overall_change", 0) > 0 else "BEARISH"
-        except:
-            market_sentiment = "NEUTRAL"
-
-        # Fetch Past Trades for Context
-        past_trades = self.db.query(AITradeHistory).filter(AITradeHistory.symbol == symbol).order_by(AITradeHistory.timestamp.desc()).limit(5).all()
-        past_trades_str = "\n".join([f"- {t.action} {t.quantity} @ {t.price:.2f} on {t.timestamp.strftime('%Y-%m-%d')} (PnL: {t.pnl})" for t in past_trades]) if past_trades else "No recent trades."
-        
-        # Construct intelligent prompt for GPT
-        prompt = f"""You are an expert autonomous trading AI managing a position in {symbol} on the Pakistan Stock Exchange (PSX).
-        **ALL PRICES ARE IN PAKISTANI RUPEES (PKR).**
-
-POSITION DETAILS:
-- Symbol: {symbol}
-- Quantity Held: {quantity} shares
-- Average Cost: Rs. {avg_cost:.2f}
-- Current Price: Rs. {current_price:.2f}
-- PnL: {pnl_percent:.2f}% (Rs. {pnl_amount:.2f})
-- Purchased Date: {purchased_at.strftime('%Y-%m-%d') if purchased_at else 'Unknown'}
-- Time Held: {holding_period_str}
-
-NEWS CONTEXT:
-"{news_summary}"
-(Use this news to determine if the stock has positive catalysts or negative headwinds)
-
-USER NOTES:
-{user_reasoning}
-
-STRATEGY GUIDELINES:
-1. **Context Matters**: {user_reasoning if user_reasoning else "No specific user notes provided."}
-2. **Time Horizon**: Positions held <3 days should be given more time unless fundamentally broken.
-3. **Risk Management**: Cut significant losses (>8-10%) to preserve capital.
-4. **Profit Taking**: Capture gains at +15-20% or on strong news catalysts.
-
-**Specific Guidelines:**
-- If holding period <3 days AND loss <5%: Default to HOLD unless severe negative news
-- If holding period <24 hours AND loss <3%: Almost always HOLD (too early to judge)
-- If loss >10%: Consider SELL to limit damage
-- If profit >15%: Consider partial profit taking (sell 30-50%)
-- News sentiment should override small P&L fluctuations
-
-**What to Consider:**
-✓ Is the loss/gain significant enough to act on?
-✓ Has there been material news that changes the thesis?
-✓ Is this a normal market fluctuation or a real problem?
-✓ Have we given the position enough time to work?
-✓ What's the overall market doing today?
-
-**Actions Available:**
-1. HOLD - Keep the position (PREFER THIS for early-stage small losses)
-2. SELL - Exit partially or fully (specify quantity)
-3. BUY_MORE - Only if extremely bullish on new positive catalyst
-
-OUTPUT FORMAT (JSON):
-{{
-    "action": "HOLD/SELL/BUY_MORE",
-    "quantity": <number of shares to sell/buy, 0 for HOLD>,
-    "confidence": "HIGH/MEDIUM/LOW",
-    "reason": "<1-2 sentence explanation>"
-}}
-
-Make a measured, patient decision. Short-term noise should not trigger premature exits."""
-
-        try:
-            print(f"\n[GPT DECISION] Analyzing position: {symbol}")
-            print(f"[GPT DECISION] PnL: {pnl_percent:.2f}% | Held: {holding_period_str} | News: {news_summary[:80]}...")
-            
-            response = self.openai_client.chat.completions.create(
-                model="gpt-4o",
-                messages=[
-                    {"role": "system", "content": "You are an expert autonomous trading AI focused on disciplined, patient decision-making. Always respond with valid JSON."},
-                    {"role": "user", "content": prompt}
-                ],
-                response_format={"type": "json_object"},
-                temperature=0.5  # Lower temperature for more consistent decisions
-            )
-            
-            decision = json.loads(response.choices[0].message.content)
-            
-            # Validate and log decision
-            print(f"[GPT DECISION] Result: {decision.get('action')} | Reason: {decision.get('reason')}")
-            
-            # Ensure quantity is valid
-            if decision.get("action") == "SELL":
-                decision["quantity"] = int(min(decision.get("quantity", quantity), quantity))
-            else:
-                decision["quantity"] = int(decision.get("quantity", 0))
-            
-            return decision
-            
-        except Exception as e:
-            print(f"[GPT DECISION ERROR] {symbol}: {str(e)}")
-            # Fallback to conservative HOLD
-            return {
-                "action": "HOLD",
-                "quantity": 0,
-                "confidence": "LOW",
-                "reason": f"GPT Error: {str(e)[:50]}. Holding position for safety."
-            }
-
-    def monitor_portfolio(self, notifications):
-        """Checks current AI holdings and uses GPT to make intelligent exit/hold decisions."""
-        holdings = self.db.query(AIPortfolioItem).all()
-        settings = self.db.query(UserSettings).first()
-        
-        print(f"\n[PORTFOLIO MONITOR] Analyzing {len(holdings)} positions with GPT...")
-        
-        for item in holdings:
-            current_price = market_data.get_live_price(item.symbol)
-            if current_price <= 0: 
-                print(f"[PORTFOLIO MONITOR] {item.symbol}: Invalid price, skipping")
-                continue
-            
-            # Update cached price
-            item.current_price = current_price
-            
-            # Use GPT to analyze the position
-            decision = self._analyze_position_with_gpt(
-                symbol=item.symbol,
-                quantity=item.quantity,
-                avg_cost=item.avg_cost,
-                current_price=current_price,
-                purchased_at=item.purchased_at  # Pass holding period info
-            )
-            
-            # Execute the decision
-            action = decision.get("action", "HOLD")
-            qty = decision.get("quantity", 0)
-            reason = decision.get("reason", "No reason provided")
-            confidence = decision.get("confidence", "UNKNOWN")
-
-            # Persist Decision to DB (for UI visibility)
-            item.last_decision = action
-            item.last_reason = reason
-            item.last_confidence = confidence
-            item.last_analyzed = datetime.utcnow()
-            if action == "SELL" and qty > 0:
-                print(f"[PORTFOLIO MONITOR] Recommendation SELL: {qty} {item.symbol} | Confidence: {confidence}")
-                self.create_recommendation(item.symbol, "SELL", qty, current_price, f"GPT Decision ({confidence}): {reason}", notifications)
-            elif action == "BUY_MORE" and qty > 0:
-                print(f"[PORTFOLIO MONITOR] GPT suggests BUY_MORE, but skipping (position management mode)")
-                # Optionally implement buy_more logic here
-            else:
-                print(f"[PORTFOLIO MONITOR] {item.symbol}: HOLD | {reason}")
-        
-        self.db.commit()
-
-    def _evaluate_and_trade(self, stock_data, action, strategy, settings, notifications):
-        symbol = stock_data["symbol"]
-        price = float(stock_data["price"])
-        
-        if price <= 0: return
-
-        # Dynamic Position Sizing based on Budget
-        # Allocate max 10% of available budget per trade
-        max_allocation = settings.ai_cash_balance * 0.10
-        qty = int(max_allocation / price)
-        
-        if qty < 1: qty = 1 # Minimum 1 share
-        
-        cost = qty * price
-        
-        # Execute if we have enough cash
-        if cost <= settings.ai_cash_balance:
-            # Create Recommendation instead of direct trade
-            self.create_recommendation(symbol, action, qty, price, strategy, notifications)
 
     def create_recommendation(self, symbol, action, quantity, price, reason, notifications):
         """Creates a trade recommendation for user approval."""
-        print(f"[RECOMMENDATION] {action} {quantity} {symbol} @ {price}")
+        print(f"[RECOMMENDATION] Proposed {action} {quantity} {symbol} @ {price}")
         
         # Check if pending recommendation exists to avoid duplicates
         existing = self.db.query(AIRecommendation).filter(
@@ -357,6 +88,9 @@ Make a measured, patient decision. Short-term noise should not trigger premature
         ).first()
         
         if existing:
+            print(f"[RECOMMENDATION] Duplicate found for {symbol}, updating.")
+            # Update quantity/reason if strategy changed mind? 
+            # Better to skip or update only if significant. Let's skip for now.
             return
 
         rec = AIRecommendation(
@@ -374,85 +108,247 @@ Make a measured, patient decision. Short-term noise should not trigger premature
         self._add_notification("Action Required", msg, "ACTION_REQUIRED", notifications)
         self.db.commit()
 
-    def execute_trade(self, symbol, action, quantity, price, reason, notifications, settings, recommendation_id=None):
-        """Executes a trade for the AI portfolio (APPROVED ONLY)."""
+    def _allocate_capital(self, available_cash: float, settings: UserSettings) -> List[Dict]:
+        """
+        Core Logic: Distributes cash to the best opportunities in the Universe.
+        Includes AI News Sentiment Analysis.
+        """
+        from news_agent import news_agent
         
-        total_value = quantity * price
+        universe = self.db.query(StockUniverse).filter(StockUniverse.active == True).all()
+        if not universe:
+            print("[ALLOCATION] Universe is empty!")
+            return []
+
+        # A. Market Regime Check (Macro)
+        regime_data = news_agent.get_sentiment_score("Pakistan Stock Exchange KSE100 Market Outlook")
+        regime_score = regime_data.get("score", 0.0)
+        regime_summary = regime_data.get("summary", "")
         
-        if action == "BUY":
-            if settings.ai_cash_balance < total_value:
-                return # Insufficient funds
+        regime_multiplier = 1.0
+        if regime_score < -0.3: 
+            regime_multiplier = 0.7 # Defensive
+            print(f"[REGIME] Defensive Mode ({regime_score}): {regime_summary}")
+        elif regime_score > 0.3: 
+            regime_multiplier = 1.2 # Aggressive
+            print(f"[REGIME] Aggressive Mode ({regime_score}): {regime_summary}")
+        else:
+            print(f"[REGIME] Neutral Mode ({regime_score})")
+
+        # B. Technical/Fundamental Scoring
+        scored_stocks = []
+        market_summary = market_data.get_market_summary()
+        
+        for stock in universe:
+            market_price = market_data.get_live_price(stock.symbol)
+            if market_price <= 0: continue
+            
+            score_details = self._calculate_opportunity_score(stock, market_price, market_summary)
+            score = score_details["total_score"]
+            
+            scored_stocks.append({
+                "symbol": stock.symbol,
+                "tier": stock.tier,
+                "score": score, # Base Score
+                "price": market_price,
+            })
+
+        # C. Filter Top Candidates for Deep AI Analysis
+        # We only check news for the top 7 to save time/tokens
+        scored_stocks.sort(key=lambda x: x["score"], reverse=True)
+        top_candidates = scored_stocks[:7]
+        
+        final_candidates = []
+        print(f"\n[AI ANALYSIS] Analyzying news for top {len(top_candidates)} candidates...")
+        
+        for cand in top_candidates:
+            # Fetch Stock Specific News
+            news_data = news_agent.get_sentiment_score(f"{cand['symbol']} stock financial news")
+            n_score = news_data.get("score", 0.0)
+            n_reason = news_data.get("summary", "")
+            
+            # Adjust Score based on News (-1 to +1 -> -20% to +20%)
+            # Base Score 80 + (Sentiment 1.0 * 20) = 100
+            # Base Score 80 + (Sentiment -1.0 * 20) = 60
+            sentiment_impact = n_score * 20
+            final_score = cand["score"] + sentiment_impact
+            final_score = min(100, max(0, final_score)) # Clamp 0-100
+            
+            print(f" > {cand['symbol']}: Base {cand['score']} + News {sentiment_impact:.1f} = {final_score:.1f} ({n_reason})")
+            
+            cand["final_score"] = final_score
+            cand["news_reason"] = f"News Sentiment: {n_score} ({n_reason})"
+            
+            if final_score > 40: # Viability Threshold
+                final_candidates.append(cand)
+
+        # D. Final Sort & Distribute
+        final_candidates.sort(key=lambda x: x["final_score"], reverse=True)
+        top_picks = final_candidates[:5]
+        
+        if not top_picks:
+            print("[ALLOCATION] No viable candidates found after news analysis.")
+            return []
+
+        # Formula: Allocation_i = (Score_i / Sum_Scores) * Deployable_Capital
+        total_score = sum(c["final_score"] for c in top_picks)
+        deployable_capital = available_cash * regime_multiplier # Adjust budget by Regime
+        deployable_capital = min(deployable_capital, available_cash) # Can't spend more than we have
+        
+        allocations = []
+        
+        print(f"\n[ALLOCATION] Distributing Rs. {deployable_capital:,.2f} among top {len(top_picks)} stocks.")
+        
+        for cand in top_picks:
+            raw_allocation = (cand["final_score"] / total_score) * deployable_capital
+            
+            # Apply Tier Limits
+            max_limit = 0
+            if cand["tier"] == "CORE": max_limit = deployable_capital * 0.80
+            elif cand["tier"] == "STABILITY": max_limit = deployable_capital * 0.30
+            else: max_limit = deployable_capital * 0.20
+            
+            final_amt = min(raw_allocation, max_limit)
+            
+            # Guardrail
+            if final_amt < 1000: continue
                 
-            # Deduct Cash
-            settings.ai_cash_balance -= total_value
-            
-            # Add to Portfolio
-            item = self.db.query(AIPortfolioItem).filter(AIPortfolioItem.symbol == symbol).first()
-            if item:
-                new_total_cost = item.total_cost + total_value
-                new_qty = item.quantity + quantity
-                item.avg_cost = new_total_cost / new_qty
-                item.quantity = new_qty
-                item.total_cost = new_total_cost
-            else:
-                new_item = AIPortfolioItem(
-                    symbol=symbol,
-                    quantity=quantity,
-                    avg_cost=price,
-                    total_cost=total_value,
-                    current_price=price,
-                    purchased_at=datetime.now()  # Track when position was opened
-                )
-                self.db.add(new_item)
-            
-            # Log History
-            history = AITradeHistory(
-                symbol=symbol, action="BUY", quantity=quantity, price=price, reason=reason
-            )
-            self.db.add(history)
-            
-            # Notification
-            msg = f"Bought {quantity} {symbol} at {price:.2f}. Reason: {reason}"
-            self._add_notification("AI Trade Executed", msg, "TRADE", notifications)
-            
-        elif action == "SELL":
-            item = self.db.query(AIPortfolioItem).filter(AIPortfolioItem.symbol == symbol).first()
-            if not item or item.quantity < quantity:
-                return # Cannot sell
-            
-            # Calculate PnL
-            pnl = (price - item.avg_cost) * quantity
-            
-            # Add Cash
-            settings.ai_cash_balance += total_value
-            
-            # Update Portfolio
-            if item.quantity == quantity:
-                self.db.delete(item)
-            else:
-                item.quantity -= quantity
-                item.total_cost -= (item.avg_cost * quantity)
-            
-            # Log History
-            history = AITradeHistory(
-                symbol=symbol, action="SELL", quantity=quantity, price=price, pnl=pnl, reason=reason
-            )
-            self.db.add(history)
-            
-            # Notification
-            msg = f"Sold {quantity} {symbol} at {price:.2f}. PnL: {pnl:.2f}. Reason: {reason}"
-            self._add_notification("AI Trade Executed", msg, "TRADE", notifications)
-            
-        # Update Recommendation Status if linked
-        if recommendation_id:
-            rec = self.db.query(AIRecommendation).filter(AIRecommendation.id == recommendation_id).first()
-            if rec:
-                rec.status = "EXECUTED"
+            qty = int(final_amt / cand["price"])
+            if qty > 0:
+                allocations.append({
+                    "symbol": cand["symbol"],
+                    "quantity": qty,
+                    "price": cand["price"],
+                    "score": int(cand["final_score"]),
+                    "tier": cand["tier"],
+                    "news_reason": cand["news_reason"]
+                })
+                print(f" -> {cand['symbol']} ({cand['tier']}): {qty} shares @ {cand['price']}")
+                
+        return allocations
+
+    def _calculate_opportunity_score(self, stock: StockUniverse, current_price: float, market_stats: Dict) -> Dict:
+        """
+        Scoring Engine (0-100)
+        """
+        fundamentals = json.loads(stock.fundamentals_json)
         
+        # A. Valuation Score (0-30)
+        # Using Fundamentals vs Price
+        val_score = 15 # Default neutral
+        fair_value = fundamentals.get("fair_value", 0)
+        pe_ratio = fundamentals.get("pe", 0) # Target PE? or Current? Assuming static 'fair' PE for now
+        
+        if fair_value > 0:
+            upside = (fair_value - current_price) / current_price
+            # If upside > 20% -> High Score
+            if upside > 0.20: val_score = 30
+            elif upside > 0.10: val_score = 25
+            elif upside > 0: val_score = 20
+            elif upside > -0.10: val_score = 10
+            else: val_score = 5
+        
+        # B. Momentum Score (0-30)
+        # Simplified using simple Moving Average logic or RSI if available.
+        # Since we only have KLines on demand, we'll try to deduce from market_data if possible, 
+        # or use a simplified "Active vs Previous" check if we had history.
+        # For now, let's use a placeholder based on market sentiment for the stock?
+        # Actually, let's fetch KLines for the specific stock to verify trend.
+        mom_score = 15
+        try:
+            # We can't fetch klines for EVERY stock in the loop efficiently without rate limits.
+            # Workaround: Use Daily Change from market_stats if present
+            # Or assume neutral if data missing.
+            pass
+        except:
+            pass
+            
+        # C. Position Context (0-15)
+        # Underweight = Higher Score
+        p_score = 7
+        existing = self.db.query(AIPortfolioItem).filter(AIPortfolioItem.symbol == stock.symbol).first()
+        
+        # Calculate current weight
+        # This is expensive to do for all, so maybe estimate?
+        # Let's Skip complex portfolio weight calc for MVP and prioritize "Don't have it? Buy it"
+        if not existing:
+            p_score = 15 # High priority if missing
+        else:
+            # If we have it, check if we are below target weight?
+            # Requires Total Portfolio Value. 
+            pass
+
+        # D. Fundamental (0-25)
+        # Static from Universe for now
+        fun_score = 20 # Assume good fundamentals if in Universe
+        
+        total = val_score + mom_score + fun_score + p_score
+        return {"total_score": min(100, total), "val": val_score, "mom": mom_score}
+
+    def execute_trade(self, symbol, action, quantity, price, reason, notifications, settings, recommendation_id=None):
+        """Executes a trade and logs it definitively."""
+        
+        # Double check cash
+        total_val = quantity * price
+        if action == "BUY" and settings.ai_cash_balance < total_val:
+            print(f"[EXECUTE] Fail: Insufficient Cash for {symbol}")
+            return
+
+        print(f"[EXECUTE] Buying {quantity} {symbol} @ {price}")
+        
+        # 1. Update Cash
+        settings.ai_cash_balance -= total_val
+        
+        # 2. Update/Create Portfolio Item
+        item = self.db.query(AIPortfolioItem).filter(AIPortfolioItem.symbol == symbol).first()
+        if item:
+            # Avg Cost Logic
+            new_cost = item.total_cost + total_val
+            new_qty = item.quantity + quantity
+            item.avg_cost = new_cost / new_qty
+            item.quantity = new_qty
+            item.total_cost = new_cost
+            item.current_price = price 
+        else:
+            new_item = AIPortfolioItem(
+                symbol=symbol,
+                quantity=quantity,
+                avg_cost=price,
+                total_cost=total_val,
+                current_price=price,
+                purchased_at=datetime.now(pytz.utc),
+                user_reasoning=reason
+            )
+            self.db.add(new_item)
+            
+        # 3. Log Trade History (Legacy & New)
+        # Important: Calculate 'pnl' as None for Buys
+        history = AITradeHistory(
+            symbol=symbol,
+            action="BUY",
+            quantity=quantity,
+            price=price,
+            pnl=None,
+            timestamp=datetime.now(pytz.utc),
+            reason=reason
+        )
+        self.db.add(history)
+        
+        # 4. Notify
+        self._add_notification(
+            f"Bought {symbol}",
+            f"Allocated {quantity} shares @ Rs. {price:.2f}. {reason}",
+            "TRADE",
+            notifications
+        )
+        
+        # 5. Commit
         self.db.commit()
 
     def _add_notification(self, title, message, type, notifications):
         note = AINotification(title=title, message=message, type=type)
         self.db.add(note)
-        self.db.commit()
+        # self.db.commit() # Commit done in caller
         notifications.append({"title": title, "message": message, "type": type})
+
+

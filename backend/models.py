@@ -2,6 +2,7 @@ from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, 
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
+import pytz
 
 import os
 from dotenv import load_dotenv
@@ -39,7 +40,7 @@ class Transaction(Base):
     action = Column(String) # BUY, SELL
     quantity = Column(Integer)
     price = Column(Float)
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime, default=lambda: datetime.now(pytz.utc))
     notes = Column(String, nullable=True)
 
 class UserSettings(Base):
@@ -64,7 +65,7 @@ class DailyPlan(Base):
     __tablename__ = "daily_plans"
 
     id = Column(Integer, primary_key=True, index=True)
-    date = Column(DateTime, default=datetime.utcnow)
+    date = Column(DateTime, default=lambda: datetime.now(pytz.utc))
     plan_json = Column(String) # JSON string of the plan
     executed = Column(Boolean, default=False)
     budget_allocated = Column(Float, default=0.0)
@@ -79,14 +80,14 @@ class AIAlert(Base):
     signal = Column(String) # BUY, SELL, HOLD
     reason = Column(String)
     url = Column(String, nullable=True)
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime, default=lambda: datetime.now(pytz.utc))
     is_read = Column(Boolean, default=False)
 
 class PortfolioHistory(Base):
     __tablename__ = "portfolio_history"
 
     id = Column(Integer, primary_key=True, index=True)
-    date = Column(DateTime, default=datetime.utcnow)
+    date = Column(DateTime, default=lambda: datetime.now(pytz.utc))
     total_value = Column(Float)
     cash_balance = Column(Float)
     holdings_value = Column(Float)
@@ -102,7 +103,7 @@ class AIPortfolioItem(Base):
     avg_cost = Column(Float)
     current_price = Column(Float, default=0.0) # Cached price for quick PnL
     total_cost = Column(Float) # quantity * avg_cost
-    purchased_at = Column(DateTime, default=datetime.utcnow) # Track when position was opened
+    purchased_at = Column(DateTime, default=lambda: datetime.now(pytz.utc)) # Track when position was opened
     user_reasoning = Column(String, nullable=True) # User's notes/reasoning for this position
     
     # AI Decision Tracking
@@ -121,7 +122,7 @@ class AIRecommendation(Base):
     price = Column(Float)
     reason = Column(String, nullable=True)
     status = Column(String, default="PENDING") # PENDING, APPROVED, DENIED, EXECUTED
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime, default=lambda: datetime.now(pytz.utc))
     
 class AITradeHistory(Base):
     __tablename__ = "ai_trade_history"
@@ -132,7 +133,7 @@ class AITradeHistory(Base):
     quantity = Column(Integer)
     price = Column(Float)
     pnl = Column(Float, nullable=True) # Only for SELL
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime, default=lambda: datetime.now(pytz.utc))
     reason = Column(String, nullable=True)
 
 class AINotification(Base):
@@ -142,8 +143,21 @@ class AINotification(Base):
     title = Column(String)
     message = Column(String)
     type = Column(String) # TRADE, ALERT, INFO, ACTION_REQUIRED
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime, default=lambda: datetime.now(pytz.utc))
     is_read = Column(Boolean, default=False)
+
+class StockUniverse(Base):
+    __tablename__ = "stock_universe"
+
+    symbol = Column(String, primary_key=True, index=True)
+    tier = Column(String) # CORE, STABILITY, OPTIONAL
+    target_weight = Column(Float, default=0.0)
+    active = Column(Boolean, default=True)
+    
+    # Store JSON string of fundamentals: {"pe": 5.2, "fair_value": 150, "growth": 10}
+    fundamentals_json = Column(String, default="{}") 
+    
+    last_updated = Column(DateTime, default=lambda: datetime.now(pytz.utc))
 
 
 

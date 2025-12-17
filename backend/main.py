@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from pydantic import BaseModel
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 from dotenv import load_dotenv
 import os
 from datetime import datetime, timedelta
@@ -563,6 +563,20 @@ def manual_add_stock(item: ManualStockAdd, db: Session = Depends(get_db)):
         user_reasoning=item.reasoning
     )
     db.add(new_item)
+    
+    # Track as Deposit so 'Invested Capital' increases
+    deposit_value = item.quantity * item.price
+    history_item = AITradeHistory(
+        symbol=item.symbol,
+        action="DEPOSIT",
+        quantity=item.quantity,
+        price=deposit_value, # Using price field for Total Value as per convention
+        pnl=None,
+        timestamp=item.date,
+        reason=f"Manual Import: {item.reasoning}"
+    )
+    db.add(history_item)
+    
     db.commit()
     return {"message": "Stock added manually"}
 
@@ -615,6 +629,46 @@ def update_stock_notes(update: NotesUpdate, db: Session = Depends(get_db)):
     item.user_reasoning = update.notes
     db.commit()
     return {"message": "Notes updated"}
+
+# --- Stock Universe Management ---
+@app.get("/autonomous/universe")
+def get_stock_universe(db: Session = Depends(get_db)):
+    """Returns the managed stock universe for the Forever Fund."""
+    from models import StockUniverse
+    return db.query(StockUniverse).order_by(StockUniverse.tier, StockUniverse.symbol).all()
+
+class UniverseItemMethod(BaseModel):
+    symbol: str
+    tier: str
+    target_weight: float
+    fundamentals: Dict[str, Any]
+
+@app.post("/autonomous/universe/update")
+def update_universe_item(item: UniverseItemMethod, db: Session = Depends(get_db)):
+    """Add or Update a stock in the Universe."""
+    from models import StockUniverse
+    import json
+    
+    existing = db.query(StockUniverse).filter(StockUniverse.symbol == item.symbol).first()
+    if existing:
+        existing.tier = item.tier
+        existing.target_weight = item.target_weight
+        existing.fundamentals_json = json.dumps(item.fundamentals)
+        existing.active = True
+        existing.last_updated = datetime.now()
+    else:
+        new_item = StockUniverse(
+            symbol=item.symbol,
+            tier=item.tier,
+            target_weight=item.target_weight,
+            fundamentals_json=json.dumps(item.fundamentals),
+            active=True,
+            last_updated=datetime.now()
+        )
+        db.add(new_item)
+    
+    db.commit()
+    return {"message": f"Updated {item.symbol}"}
 
 @app.post("/autonomous/trade")
 def trigger_trading_cycle(db: Session = Depends(get_db)):
@@ -745,7 +799,16 @@ def get_ai_portfolio_data(db: Session, refresh_prices: bool = True):
     
     total_invested_capital = initial_capital + total_deposits
     
-    overall_pnl_percent = (overall_pnl / total_invested_capital * 100) if total_invested_capital > 0 else 0
+    # User Request: "Return % should be only dependent on the unrealized pnl"
+    # Interpretation: Return % = (Unrealized PnL / Cost Basis of Current Holdings) * 100
+    # This reflects the performance of the current active portfolio.
+    
+    current_cost_basis = total_value - total_pnl # Market Value - Unrealized PnL = Cost Basis
+    
+    if current_cost_basis > 0:
+        overall_pnl_percent = (total_pnl / current_cost_basis) * 100
+    else:
+        overall_pnl_percent = 0.0
         
     return {
         "holdings": portfolio_data,

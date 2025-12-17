@@ -1,4 +1,4 @@
-from ddgs import DDGS
+from duckduckgo_search import DDGS
 from llm_agent import llm_agent
 from datetime import datetime
 import json
@@ -112,5 +112,57 @@ class NewsAgent:
         except Exception as e:
             print(f"Error analyzing news: {e}")
             return []
+
+    def get_sentiment_score(self, query: str) -> dict:
+        """
+        Fetches news for a query and uses LLM to determine a sentiment score (-1.0 to +1.0).
+        Returns: {"score": float, "summary": str}
+        """
+        print(f"[NEWS AGENT] Analyzing sentiment for: {query}")
+        
+        # 1. Fetch News
+        results = self.search_web(f"{query} Pakistan Stock Exchange news", limit=5)
+        if not results:
+            print(f"[NEWS AGENT] No news found for {query}")
+            return {"score": 0.0, "summary": "No recent news found."}
+            
+        news_text = "\n".join([f"- {item['title']} ({item['body']})" for item in results])
+        
+        # 2. Analyze with LLM
+        prompt = f"""
+        Analyze the sentiment of the following news regarding '{query}' in the context of the Pakistan Stock Exchange.
+        
+        News:
+        {news_text}
+        
+        Determine a "Sentiment Score" from -1.0 (Very Negative/Bearish) to +1.0 (Very Positive/Bullish). 0.0 is Neutral.
+        Also provide a 1-sentence summary of WHY.
+        
+        Return JSON: {{"score": float, "summary": "string"}}
+        """
+        
+        messages = [
+            {"role": "system", "content": "You are a financial sentiment analyzer. Return JSON only."},
+            {"role": "user", "content": prompt}
+        ]
+        
+        try:
+            if not llm_agent.client: return {"score": 0.0, "summary": "LLM invalid"}
+            
+            response = llm_agent.client.chat.completions.create(
+                model="gpt-4o",
+                messages=messages,
+                response_format={"type": "json_object"}
+            )
+            data = json.loads(response.choices[0].message.content)
+            score = float(data.get("score", 0.0))
+            summary = data.get("summary", "Neutral")
+            
+            print(f"[NEWS AGENT] {query} -> Score: {score} ({summary})")
+            return {"score": score, "summary": summary}
+            
+        except Exception as e:
+            print(f"Error in sentiment analysis: {e}")
+            return {"score": 0.0, "summary": "Error analyzing news"}
 
 news_agent = NewsAgent()
