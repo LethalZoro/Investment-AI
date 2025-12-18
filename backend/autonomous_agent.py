@@ -288,60 +288,106 @@ class AutonomousAgent:
     def execute_trade(self, symbol, action, quantity, price, reason, notifications, settings, recommendation_id=None):
         """Executes a trade and logs it definitively."""
         
-        # Double check cash
         total_val = quantity * price
-        if action == "BUY" and settings.ai_cash_balance < total_val:
-            print(f"[EXECUTE] Fail: Insufficient Cash for {symbol}")
-            return
+        
+        if action == "BUY":
+            # Double check cash
+            if settings.ai_cash_balance < total_val:
+                print(f"[EXECUTE] Fail: Insufficient Cash for {symbol}")
+                return
 
-        print(f"[EXECUTE] Buying {quantity} {symbol} @ {price}")
-        
-        # 1. Update Cash
-        settings.ai_cash_balance -= total_val
-        
-        # 2. Update/Create Portfolio Item
-        item = self.db.query(AIPortfolioItem).filter(AIPortfolioItem.symbol == symbol).first()
-        if item:
-            # Avg Cost Logic
-            new_cost = item.total_cost + total_val
-            new_qty = item.quantity + quantity
-            item.avg_cost = new_cost / new_qty
-            item.quantity = new_qty
-            item.total_cost = new_cost
-            item.current_price = price 
-        else:
-            new_item = AIPortfolioItem(
-                symbol=symbol,
-                quantity=quantity,
-                avg_cost=price,
-                total_cost=total_val,
-                current_price=price,
-                purchased_at=datetime.now(pytz.utc),
-                user_reasoning=reason
-            )
-            self.db.add(new_item)
+            print(f"[EXECUTE] Buying {quantity} {symbol} @ {price}")
             
-        # 3. Log Trade History (Legacy & New)
-        # Important: Calculate 'pnl' as None for Buys
-        history = AITradeHistory(
-            symbol=symbol,
-            action="BUY",
-            quantity=quantity,
-            price=price,
-            pnl=None,
-            timestamp=datetime.now(pytz.utc),
-            reason=reason
-        )
-        self.db.add(history)
-        
-        # 4. Notify
-        self._add_notification(
-            f"Bought {symbol}",
-            f"Allocated {quantity} shares @ Rs. {price:.2f}. {reason}",
-            "TRADE",
-            notifications
-        )
-        
+            # 1. Update Cash
+            settings.ai_cash_balance -= total_val
+            
+            # 2. Update/Create Portfolio Item
+            item = self.db.query(AIPortfolioItem).filter(AIPortfolioItem.symbol == symbol).first()
+            if item:
+                # Avg Cost Logic
+                new_cost = item.total_cost + total_val
+                new_qty = item.quantity + quantity
+                item.avg_cost = new_cost / new_qty
+                item.quantity = new_qty
+                item.total_cost = new_cost
+                item.current_price = price 
+            else:
+                new_item = AIPortfolioItem(
+                    symbol=symbol,
+                    quantity=quantity,
+                    avg_cost=price,
+                    total_cost=total_val,
+                    current_price=price,
+                    purchased_at=datetime.now(pytz.utc),
+                    user_reasoning=reason
+                )
+                self.db.add(new_item)
+                
+            # 3. Log Trade History
+            history = AITradeHistory(
+                symbol=symbol,
+                action="BUY",
+                quantity=quantity,
+                price=price,
+                pnl=None,
+                timestamp=datetime.now(pytz.utc),
+                reason=reason
+            )
+            self.db.add(history)
+            
+            # 4. Notify
+            self._add_notification(
+                f"Bought {symbol}",
+                f"Allocated {quantity} shares @ Rs. {price:.2f}. {reason}",
+                "TRADE",
+                notifications
+            )
+            
+        elif action == "SELL":
+            print(f"[EXECUTE] Selling {quantity} {symbol} @ {price}")
+            
+            item = self.db.query(AIPortfolioItem).filter(AIPortfolioItem.symbol == symbol).first()
+            if not item or item.quantity < quantity:
+                print(f"[EXECUTE] Fail: Insufficient Quantity for {symbol}")
+                return
+
+            # 1. Update Cash
+            settings.ai_cash_balance += total_val
+            
+            # 2. Update Portfolio Item
+            # PnL Calculation
+            # Cost Basis of sold portion = avg_cost * quantity
+            cost_basis_sold = item.avg_cost * quantity
+            pnl = total_val - cost_basis_sold
+            
+            # Update Item
+            item.quantity -= quantity
+            item.total_cost -= cost_basis_sold 
+            item.current_price = price
+            
+            if item.quantity == 0:
+                self.db.delete(item)
+            
+            # 3. Log Trade History
+            history = AITradeHistory(
+                symbol=symbol,
+                action="SELL",
+                quantity=quantity,
+                price=price,
+                pnl=pnl,
+                timestamp=datetime.now(pytz.utc),
+                reason=reason
+            )
+            self.db.add(history)
+            
+            # 4. Notify
+            self._add_notification(
+                f"Sold {symbol}",
+                f"Sold {quantity} shares @ Rs. {price:.2f}. PnL: {pnl:.2f}. {reason}",
+                "TRADE",
+                notifications
+            )
+
         # 5. Commit
         self.db.commit()
 

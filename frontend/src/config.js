@@ -1,5 +1,6 @@
-// API Configuration
-// Points to the hosted backend on Railway
-export const API_BASE_URL = "https://accurate-reflection-production.up.railway.app";
-// export const API_BASE_URL = "http://127.0.0.1:8000";
+// In Vite, we use import.meta.env to access environment variables.
+// They must start with VITE_ to be exposed.
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
+console.log("Current API URL:", API_BASE_URL);
+console.log("Environment Mode:", import.meta.env.MODE);

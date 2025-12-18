@@ -274,6 +274,12 @@ def sell_portfolio_item(sell: PortfolioSell, db: Session = Depends(get_db)):
     if not item:
         raise HTTPException(status_code=404, detail="Item not found in portfolio")
     
+    if sell.quantity <= 0:
+        raise HTTPException(status_code=400, detail="Quantity must be positive")
+        
+    if sell.price < 0:
+        raise HTTPException(status_code=400, detail="Price must be non-negative")
+    
     if item.quantity < sell.quantity:
         raise HTTPException(status_code=400, detail="Insufficient quantity")
     
