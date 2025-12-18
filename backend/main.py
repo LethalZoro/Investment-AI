@@ -255,11 +255,48 @@ class PortfolioItemCreate(BaseModel):
 
 @app.post("/portfolio/add")
 def add_portfolio_item(item: PortfolioItemCreate, db: Session = Depends(get_db)):
-    db_item = PortfolioItem(**item.dict())
-    db.add(db_item)
+    # 1. Check if item exists
+    db_item = db.query(PortfolioItem).filter(PortfolioItem.symbol == item.symbol).first()
+    
+    if db_item:
+        # Aggregate: Calculate new weighted avg cost
+        total_cost_old = db_item.quantity * db_item.avg_cost
+        total_cost_new = item.quantity * item.avg_cost
+        new_total_qty = db_item.quantity + item.quantity
+        
+        new_avg_cost = (total_cost_old + total_cost_new) / new_total_qty
+        
+        db_item.quantity = new_total_qty
+        db_item.avg_cost = new_avg_cost
+        # Strategy tag update? Optional. Let's keep old or overwrite? 
+        # Requirement says "same stocks only have one entry".
+        # We'll update strategy tag to the new one if provided, or keep old? 
+        # Defaulting to overwrite with new tag if not UNASSIGNED
+        if item.strategy_tag != "UNASSIGNED":
+            db_item.strategy_tag = item.strategy_tag
+            
+        print(f"Updated {item.symbol}: Qty {new_total_qty}, Avg {new_avg_cost:.2f}")
+    else:
+        # Create new
+        db_item = PortfolioItem(**item.dict())
+        db.add(db_item)
+        print(f"Created {item.symbol}")
+
+    # 2. Log Transaction
+    transaction = Transaction(
+        symbol=item.symbol,
+        action="BUY", # Manual Add is treated as Buy
+        quantity=item.quantity,
+        price=item.avg_cost,
+        timestamp=datetime.now(),
+        notes="Manual Entry"
+    )
+    db.add(transaction)
+    
     db.commit()
-    db.refresh(db_item)
-    db.refresh(db_item)
+    db.refresh(db_item if db_item else transaction) # Refresh item to return it
+    
+    # Return the updated/new item
     return db_item
 
 class PortfolioSell(BaseModel):
@@ -376,6 +413,11 @@ def get_company_info(symbol: str):
 @app.get("/market/search")
 def search_market(q: str):
     return market_data.search_symbol(q)
+
+@app.get("/portfolio/transactions")
+def get_transactions(limit: int = 50, db: Session = Depends(get_db)):
+    """Returns manual transaction history."""
+    return db.query(Transaction).order_by(Transaction.timestamp.desc()).limit(limit).all()
 
 # --- Chat Route ---
 class ChatRequest(BaseModel):
@@ -531,6 +573,7 @@ def handle_recommendation(rec_id: int, action: str, db: Session = Depends(get_db
             recommendation_id=rec.id
         )
         rec.status = "APPROVED" # execute_trade will set to EXECUTED, but safe to update here too
+        db.commit() # Ensure status update is saved
         
     elif action == "deny":
         rec.status = "DENIED"
@@ -549,42 +592,71 @@ class ManualStockAdd(BaseModel):
 def manual_add_stock(item: ManualStockAdd, db: Session = Depends(get_db)):
     """Manually add a stock to AI portfolio."""
     
-    # Update AI Cost Basis / Cash? 
-    # If user says "I bought this", should we deduct cash? 
-    # Usually manual add implies existing holding. Let's ask or assume.
-    # The user said: "it asks for the stock, how many shares i have, what price i bought them at and also at what date I bought them"
-    # It complicates 'AI Cash Balance'. If we deduct cash, it might go negative if it was a past buy.
-    # Let's assume we just track it and DONT touch cash, OR we deduct if it fits. 
-    # Safest is to NOT touch cash if it's a "migrate" action, but if it's "I just bought this", we might want to.
-    # Given requirements "I bought them at" (past tense), let's NOT deduct cash for now, or maybe create a "Correction" transaction.
-    # User didn't specify cash handling for manual adds. Let's just add to portfolio.
+    # 1. Check if item exists
+    db_item = db.query(AIPortfolioItem).filter(AIPortfolioItem.symbol == item.symbol).first()
     
-    new_item = AIPortfolioItem(
-        symbol=item.symbol,
-        quantity=item.quantity,
-        avg_cost=item.price,
-        total_cost=item.quantity * item.price,
-        current_price=item.price, # Will update on next refresh
-        purchased_at=item.date,
-        user_reasoning=item.reasoning
-    )
-    db.add(new_item)
+    if db_item:
+        # CONSOLIDATE: Calculate new weighted avg cost
+        # Old Total Cost + New Total Cost / Old Qty + New Qty
+        
+        # Use existing total_cost if accurate, or qty * avg_cost
+        current_total_cost = db_item.total_cost 
+        new_addition_cost = item.quantity * item.price
+        
+        new_total_qty = db_item.quantity + item.quantity
+        new_total_cost = current_total_cost + new_addition_cost
+        
+        new_avg_cost = new_total_cost / new_total_qty
+        
+        # Update Record
+        db_item.quantity = new_total_qty
+        db_item.total_cost = new_total_cost
+        db_item.avg_cost = new_avg_cost
+        db_item.current_price = item.price # Update current price reference
+        # Append reason? Or overwrite? Let's append if different
+        if item.reasoning and item.reasoning not in db_item.user_reasoning:
+             db_item.user_reasoning += f" | {item.reasoning}"
+             
+        print(f"Consolidated {item.symbol}: New Qty {new_total_qty}, Avg {new_avg_cost:.2f}")
+        
+    else:
+        # CREATE NEW
+        new_item = AIPortfolioItem(
+            symbol=item.symbol,
+            quantity=item.quantity,
+            avg_cost=item.price,
+            total_cost=item.quantity * item.price,
+            current_price=item.price, # Will update on next refresh
+            purchased_at=item.date,
+            user_reasoning=item.reasoning
+        )
+        db.add(new_item)
     
-    # Track as Deposit so 'Invested Capital' increases
-    deposit_value = item.quantity * item.price
+    
+    # Track as Manual Buy so 'Invested Capital' increases correctly
+    # Action=MANUAL_BUY, Price=Unit Price, Qty=Qty
     history_item = AITradeHistory(
         symbol=item.symbol,
-        action="DEPOSIT",
+        action="MANUAL_BUY",
         quantity=item.quantity,
-        price=deposit_value, # Using price field for Total Value as per convention
+        price=item.price, # Unit Price
         pnl=None,
         timestamp=item.date,
-        reason=f"Manual Import: {item.reasoning}"
+        reason=f"Manual Add: {item.reasoning}"
     )
     db.add(history_item)
     
+    # Add Notification
+    note = AINotification(
+        title=f"Manual Add: {item.symbol}",
+        message=f"Manually added {item.quantity} shares of {item.symbol} @ Rs. {item.price:.2f}",
+        type="INFO",
+        timestamp=datetime.now(pytz.utc)
+    )
+    db.add(note)
+    
     db.commit()
-    return {"message": "Stock added manually"}
+    return {"message": "Stock added/updated manually"}
 
 class ManualStockSell(BaseModel):
     symbol: str
@@ -804,12 +876,19 @@ def get_ai_portfolio_data(db: Session, refresh_prices: bool = True):
     # Note: total_pnl calculated above is the Unrealized PnL of current holdings
     overall_pnl = total_realized_pnl + total_pnl
     
-    # Calculate Total Invested Capital (Initial + Deposits) for percentage calculation
-    total_deposits = db.query(func.sum(AITradeHistory.price)).filter(
+    # Calculate Total Invested Capital (Initial + Deposits + Manual Buys)
+    # 1. Cash Deposits (Action=DEPOSIT, Price=Amount)
+    cash_deposits = db.query(func.sum(AITradeHistory.price)).filter(
         AITradeHistory.action == "DEPOSIT"
     ).scalar() or 0.0
     
-    total_invested_capital = initial_capital + total_deposits
+    # 2. Manual Stock Imports (Action=MANUAL_BUY, Price=Unit Price, Qty=Qty)
+    # We need sum(price * quantity)
+    manual_stock_value = db.query(func.sum(AITradeHistory.price * AITradeHistory.quantity)).filter(
+        AITradeHistory.action == "MANUAL_BUY"
+    ).scalar() or 0.0
+    
+    total_invested_capital = initial_capital + cash_deposits + manual_stock_value
     
     # User Request: "Return % should be only dependent on the unrealized pnl"
     # Interpretation: Return % = (Unrealized PnL / Cost Basis of Current Holdings) * 100
@@ -859,8 +938,8 @@ def run_daily_budget_injection():
         deposit_record = AITradeHistory(
             symbol="DEPOSIT",
             action="DEPOSIT",
-            quantity=0,
-            price=budget_to_add,
+            quantity=0, # Cash injection has 0 qty
+            price=budget_to_add, # Price holds the Amount for DEPOSIT
             # total_value removed as it doesn't exist in model
             pnl=None,
             reason=f"Daily budget injection: Rs. {budget_to_add:,.2f}"

@@ -17,11 +17,18 @@ const AddStockModal = ({ onClose, onAdd }) => {
     const handleSubmit = async (e) => {
         e.preventDefault();
         try {
+            // Use current time if selected date is today, otherwise use selected date at 00:00
+            const selectedDate = new Date(formData.date);
+            const now = new Date();
+            if (selectedDate.toDateString() === now.toDateString()) {
+                selectedDate.setHours(now.getHours(), now.getMinutes(), now.getSeconds());
+            }
+
             await axios.post(`${API_BASE_URL}/autonomous/holdings/add`, {
                 symbol: formData.symbol.toUpperCase(),
                 quantity: parseInt(formData.quantity),
                 price: parseFloat(formData.price),
-                date: new Date(formData.date).toISOString(),
+                date: selectedDate.toISOString(),
                 reasoning: formData.reasoning
             });
             onAdd();
@@ -494,6 +501,12 @@ const AIStockDashboard = () => {
                             Dashboard
                         </button>
                         <button
+                            onClick={() => setActiveTab('history')}
+                            className={`px-4 py-2 rounded-md transition-colors ${activeTab === 'history' ? 'bg-primary text-white font-bold' : 'text-text-secondary hover:text-white'}`}
+                        >
+                            History
+                        </button>
+                        <button
                             onClick={() => setActiveTab('actions')}
                             className={`px-4 py-2 rounded-md transition-colors flex items-center gap-2 ${activeTab === 'actions' ? 'bg-primary text-white font-bold' : 'text-text-secondary hover:text-white'}`}
                         >
@@ -521,6 +534,66 @@ const AIStockDashboard = () => {
                     </button>
                 </div>
             </div>
+
+            {activeTab === 'history' && (
+                <div className="card animate-fade-in">
+                    <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                        <History className="w-5 h-5 text-text-secondary" /> Transaction History
+                    </h2>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse">
+                            <thead className="bg-surface/50 text-text-secondary uppercase text-xs font-semibold tracking-wider">
+                                <tr>
+                                    <th className="p-4 border-b border-slate-700">Date/Time</th>
+                                    <th className="p-4 border-b border-slate-700">Symbol</th>
+                                    <th className="p-4 border-b border-slate-700">Action</th>
+                                    <th className="p-4 border-b border-slate-700">Quantity</th>
+                                    <th className="p-4 border-b border-slate-700">Price</th>
+                                    <th className="p-4 border-b border-slate-700">Total Value</th>
+                                    <th className="p-4 border-b border-slate-700">Notes</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-700">
+                                {tradeHistory.length === 0 ? (
+                                    <tr>
+                                        <td colSpan="7" className="p-8 text-center text-text-muted">No history found.</td>
+                                    </tr>
+                                ) : (
+                                    tradeHistory.map((tx, idx) => (
+                                        <tr key={idx} className="hover:bg-slate-800/50 transition-colors">
+                                            <td className="p-4 text-text-secondary text-sm">
+                                                {new Date(tx.timestamp).toLocaleString()}
+                                            </td>
+                                            <td className="p-4 font-bold text-white">{tx.symbol}</td>
+                                            <td className="p-4">
+                                                <span className={`px-2 py-1 rounded text-xs font-bold uppercase ${tx.action === 'BUY' || tx.action === 'MANUAL_BUY' ? 'bg-emerald-500/20 text-emerald-500' :
+                                                    tx.action === 'SELL' ? 'bg-rose-500/20 text-rose-500' :
+                                                        tx.action === 'DEPOSIT' ? 'bg-blue-500/20 text-blue-500' : 'bg-slate-700 text-slate-300'
+                                                    }`}>
+                                                    {tx.action === 'MANUAL_BUY' ? 'MANUAL ADD' : tx.action}
+                                                </span>
+                                            </td>
+                                            <td className="p-4 text-text-primary">{tx.quantity}</td>
+                                            <td className="p-4 text-text-secondary">
+                                                {tx.action === 'DEPOSIT' ? '-' : `Rs. ${tx.price?.toLocaleString()}`}
+                                            </td>
+                                            <td className="p-4 font-medium text-white">
+                                                {tx.action === 'DEPOSIT'
+                                                    ? `Rs. ${tx.price?.toLocaleString()}`
+                                                    : `Rs. ${(tx.quantity * (tx.price || 0)).toLocaleString()}`
+                                                }
+                                            </td>
+                                            <td className="p-4 text-text-muted text-sm max-w-xs truncate" title={tx.reason}>
+                                                {tx.reason}
+                                            </td>
+                                        </tr>
+                                    ))
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
 
             {activeTab === 'actions' && (
                 <div className="space-y-6 animate-fade-in">

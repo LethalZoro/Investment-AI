@@ -1,72 +1,58 @@
-import os
+from sqlalchemy.orm import Session
+from models import StockUniverse, init_db, SessionLocal
 import json
-from datetime import datetime
-from dotenv import load_dotenv
-
-# Load Env
-env_path = os.path.join(os.path.dirname(__file__), ".env")
-load_dotenv(env_path)
-
-from models import SessionLocal, StockUniverse, init_db
 
 def seed_universe():
-    print("Initializing Database...")
-    init_db() # Creates the table if it doesn't exist
-    
     db = SessionLocal()
     
-    # Define Universe
-    # Tier 1: Conviction (1 stock, 30-40%)
-    # Tier 2: Stability (4 stocks, ~10% each)
-    # Tier 3: Optionality (10-11 stocks, 2-5% each)
-    
-    universe = [
-        # TIER 1
-        {"symbol": "SYS", "tier": "CORE", "target_weight": 0.40, "fundamentals": {"pe": 18.5, "fair_value": 600, "growth": 15}},
+    # User's Restricted "Forever Fund" List
+    restricted_list = [
+        {"symbol": "SYS", "tier": "CORE", "target_weight": 0.10, "fundamentals": {"pe": 12.0, "fair_value": 150, "growth": 20}},
+        {"symbol": "PSX", "tier": "CORE", "target_weight": 0.10, "fundamentals": {"pe": 8.5, "fair_value": 45, "growth": 15}},
+        {"symbol": "MEBL", "tier": "CORE", "target_weight": 0.10, "fundamentals": {"pe": 6.0, "fair_value": 200, "yield": 8}},
+        {"symbol": "LUCK", "tier": "CORE", "target_weight": 0.08, "fundamentals": {"pe": 7.5, "fair_value": 750, "growth": 10}},
+        {"symbol": "OGDC", "tier": "CORE", "target_weight": 0.08, "fundamentals": {"pe": 4.5, "fair_value": 150, "yield": 12}},
         
-        # TIER 2
-        {"symbol": "OGDC", "tier": "STABILITY", "target_weight": 0.10, "fundamentals": {"pe": 4.5, "fair_value": 180, "yield": 12}},
-        {"symbol": "PPL", "tier": "STABILITY", "target_weight": 0.10, "fundamentals": {"pe": 4.2, "fair_value": 150, "yield": 10}},
-        {"symbol": "LUCK", "tier": "STABILITY", "target_weight": 0.10, "fundamentals": {"pe": 6.8, "fair_value": 900, "growth": 8}},
-        {"symbol": "ENGRO", "tier": "STABILITY", "target_weight": 0.10, "fundamentals": {"pe": 7.5, "fair_value": 350, "yield": 9}},
+        {"symbol": "JSBL", "tier": "STABILITY", "target_weight": 0.05, "fundamentals": {"pe": 5.0, "fair_value": 20, "growth": 15}},
+        {"symbol": "ZAL", "tier": "STABILITY", "target_weight": 0.05, "fundamentals": {"pe": 8.0, "fair_value": 50, "growth": 18}},
+        {"symbol": "SAZEW", "tier": "STABILITY", "target_weight": 0.05, "fundamentals": {"pe": 7.0, "fair_value": 1600, "growth": 25}},
+        {"symbol": "MARI", "tier": "STABILITY", "target_weight": 0.05, "fundamentals": {"pe": 5.5, "fair_value": 800, "yield": 10}},
+        {"symbol": "BAFL", "tier": "STABILITY", "target_weight": 0.05, "fundamentals": {"pe": 4.0, "fair_value": 110, "yield": 11}},
         
-        # TIER 3
-        {"symbol": "TRG", "tier": "OPTIONAL", "target_weight": 0.03, "fundamentals": {"pe": 12.0, "fair_value": 85, "growth": 20}},
-        {"symbol": "AVN", "tier": "OPTIONAL", "target_weight": 0.02, "fundamentals": {"pe": 9.5, "fair_value": 70, "growth": 15}},
-        {"symbol": "NETSOL", "tier": "OPTIONAL", "target_weight": 0.02, "fundamentals": {"pe": 10.0, "fair_value": 120, "growth": 18}},
-        {"symbol": "AIRLINK", "tier": "OPTIONAL", "target_weight": 0.02, "fundamentals": {"pe": 8.5, "fair_value": 60, "growth": 25}},
-        {"symbol": "SAZEW", "tier": "OPTIONAL", "target_weight": 0.02, "fundamentals": {"pe": 7.0, "fair_value": 1500, "growth": 12}},
-        {"symbol": "MARI", "tier": "OPTIONAL", "target_weight": 0.03, "fundamentals": {"pe": 5.5, "fair_value": 3000, "yield": 8}},
-        {"symbol": "MEBL", "tier": "OPTIONAL", "target_weight": 0.02, "fundamentals": {"pe": 6.0, "fair_value": 200, "yield": 5}},
-        {"symbol": "UBL", "tier": "OPTIONAL", "target_weight": 0.02, "fundamentals": {"pe": 4.8, "fair_value": 180, "yield": 15}},
-        {"symbol": "MCB", "tier": "OPTIONAL", "target_weight": 0.02, "fundamentals": {"pe": 5.2, "fair_value": 190, "yield": 14}},
+        {"symbol": "FFC", "tier": "DYP", "target_weight": 0.05, "fundamentals": {"pe": 6.5, "fair_value": 500, "yield": 11}},
+        {"symbol": "ENGROH", "tier": "DYP", "target_weight": 0.05, "fundamentals": {"pe": 7.0, "fair_value": 230, "yield": 9}},
+        {"symbol": "EFERT", "tier": "DYP", "target_weight": 0.05, "fundamentals": {"pe": 6.8, "fair_value": 220, "yield": 10}},
+        {"symbol": "TPLP", "tier": "OPTIONAL", "target_weight": 0.05, "fundamentals": {"pe": 15.0, "fair_value": 15, "growth": 30}},
+        {"symbol": "DCR", "tier": "OPTIONAL", "target_weight": 0.05, "fundamentals": {"pe": 10.0, "fair_value": 40, "yield": 7}},
     ]
+
+    print("--- Seeding Universe ---")
     
-    print(f"Seeding {len(universe)} stocks into Universe...")
+    # 1. Deactivate all existing first (optional, or just update)
+    # db.query(StockUniverse).update({StockUniverse.active: False})
     
-    for item in universe:
-        existing = db.query(StockUniverse).filter(StockUniverse.symbol == item["symbol"]).first()
-        if not existing:
-            new_stock = StockUniverse(
+    for item in restricted_list:
+        db_item = db.query(StockUniverse).filter(StockUniverse.symbol == item["symbol"]).first()
+        if db_item:
+            db_item.tier = item["tier"]
+            db_item.target_weight = item["target_weight"]
+            db_item.fundamentals_json = json.dumps(item["fundamentals"])
+            db_item.active = True
+            print(f"Updated {item['symbol']}")
+        else:
+            new_item = StockUniverse(
                 symbol=item["symbol"],
                 tier=item["tier"],
                 target_weight=item["target_weight"],
-                active=True,
                 fundamentals_json=json.dumps(item["fundamentals"]),
-                last_updated=datetime.utcnow()
+                active=True
             )
-            db.add(new_stock)
-            print(f"Added {item['symbol']} ({item['tier']})")
-        else:
-            # Update existing if needed
-            existing.tier = item["tier"]
-            existing.target_weight = item["target_weight"]
-            existing.fundamentals_json = json.dumps(item["fundamentals"])
-            print(f"Updated {item['symbol']}")
-            
+            db.add(new_item)
+            print(f"Created {item['symbol']}")
+    
     db.commit()
-    print("Seed Complete.")
-    db.close()
+    print("Seeding Complete.")
 
 if __name__ == "__main__":
+    init_db()
     seed_universe()

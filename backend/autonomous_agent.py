@@ -116,6 +116,20 @@ class AutonomousAgent:
         from news_agent import news_agent
         
         universe = self.db.query(StockUniverse).filter(StockUniverse.active == True).all()
+        
+        # --- RESTRICTION: Only Recommend Held Stocks ---
+        holdings = self.db.query(AIPortfolioItem).all()
+        held_symbols = {h.symbol for h in holdings}
+        
+        # Filter Universe
+        # We only keep stocks that are currently in the portfolio
+        universe = [s for s in universe if s.symbol in held_symbols]
+        
+        if not universe:
+            print("[ALLOCATION] Restricted Mode: No held stocks found in Universe. Skipping analysis.")
+            return []
+        # -----------------------------------------------
+
         if not universe:
             print("[ALLOCATION] Universe is empty!")
             return []
